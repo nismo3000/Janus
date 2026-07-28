@@ -102,6 +102,38 @@ The synthetic world rotates its generative regime every 45 s and injects brief
 out-of-regime events, which is what makes novelty *measurable* rather than
 anecdotal — there is ground truth to compute an AUC against.
 
+### Results — 3 × 300 s, 9,000 frames each, identical stream
+
+| metric | live | frozen ctrl | no-replay |
+|---|---:|---:|---:|
+| served fps | 29.95 | 29.95 | 29.95 |
+| inference ms (p50 / p99) | 1.58 / 15.25 | 1.73 / 1.97 | 1.62 / 15.13 |
+| gradient steps (while serving) | 26,855 | 0 | 26,938 |
+| weight versions served | 539 | 1 | 539 |
+| **skill vs copy baseline** | **+0.248** | −15.60 | +0.201 |
+| skill, last third | +0.383 | −17.75 | +0.219 |
+| **novelty AUC** | **0.879** | 0.451 | 0.773 |
+| surprise: normal → anomaly | 0.574 → 0.849 | 0.955 → 0.946 | 0.635 → 0.842 |
+| probe error on early clips | **0.567** | — | 0.817 |
+| embedding effective rank (min / final) | 19.8 / 60.3 | — | 31.9 / 60.7 |
+
+All six claims pass. Reading the table:
+
+- The **frozen control** is the whole argument for reporting skill rather than raw
+  error. Its raw surprise (0.955) looks merely bad, but its *copy* error is 0.057 —
+  an untrained encoder embeds consecutive frames almost identically, so "the future
+  looks like now" is nearly perfect for it. Skill −15.6 exposes that as the
+  degeneracy it is, and its novelty AUC of 0.451 confirms it: an untrained model
+  cannot tell an anomaly from a normal frame at all.
+- The **no-replay ablation** isolates what the reservoir buys. It trains just as hard
+  (26,938 steps) and lands respectable skill, but probe error on early clips is
+  0.817 vs 0.567 with replay — it is quietly forgetting the world it saw first. Its
+  novelty AUC is correspondingly worse (0.773 vs 0.879).
+- **Hot-swapping is not free.** p99 inference latency is 15.25 ms live vs 1.97 ms
+  frozen — that tail is the 11 MB weight copy landing between frames. It fits inside
+  the 33 ms budget at 30 fps, but it would not at 120 fps, and that is the number to
+  watch when this moves to a faster stream.
+
 ## Layout
 
 | file | role |
@@ -117,6 +149,24 @@ anecdotal — there is ground truth to compute an AUC against.
 
 ## Status
 
-v0. The plumbing is solid — it genuinely serves and trains concurrently, and the
-novelty signal is real. Absolute predictive skill is modest and decays within a
-regime block; that is the open problem, not the architecture.
+v0, and it works: it genuinely serves and trains concurrently, replay demonstrably
+prevents forgetting, and the novelty signal is strong (AUC 0.879 against ground
+truth).
+
+An earlier 90 s run suggested skill decayed *within* a stationary regime, which
+looked like EMA-target drift. The 300 s runs do not support that: skill in the last
+third (+0.383) beats the run average (+0.248), and surprise falls by 0.134 from the
+start to the end of each regime block. The apparent decay was a short-run artifact
+of the cold-start period, when the still-smooth encoder makes early skill numbers
+inflated and meaningless.
+
+Open ends, in order of interest:
+
+1. **Absolute skill is modest** (+0.25). The model beats "the future looks like now,"
+   but not by the margin a deterministic toy world should allow. Worth a sweep over
+   horizon, context length, and predictor capacity.
+2. **Real video.** Everything above is synthetic. `--source x11` and `--source file`
+   exist and run, but nothing here has been measured on natural video, where there is
+   no ground-truth anomaly label to compute an AUC against.
+3. **Latency headroom.** The 15 ms p99 weight-swap spike caps the practical frame
+   rate; a delta or half-precision publish would cut it.
