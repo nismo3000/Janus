@@ -1,0 +1,9 @@
+venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+
+# run artifacts: telemetry is large and regenerable
+runs/
+*.pt
+*.jsonl

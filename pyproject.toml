@@ -1,0 +1,25 @@
+[project]
+name = "janus"
+version = "0.1.0"
+description = "A video world-model that learns and infers simultaneously"
+requires-python = ">=3.12"
+dependencies = [
+    "torch>=2.11",
+    "numpy>=1.26",
+    "opencv-python-headless>=4.10",
+    "mss>=9.0",
+    "rich>=13.0",
+]
+
+[project.scripts]
+janus = "janus.run:main"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["janus*"]
+
+[tool.ruff]
+line-length = 100
