@@ -134,6 +134,49 @@ All six claims pass. Reading the table:
   the 33 ms budget at 30 fps, but it would not at 120 fps, and that is the number to
   watch when this moves to a faster stream.
 
+## Prior work
+
+Janus assembles standard, published components; the claim to novelty is the
+*configuration* — training and serving simultaneously against one live stream —
+and the failure modes that only exist there. Credit where each piece came from:
+
+- **Predicting embeddings, not pixels** is the JEPA program: LeCun's position
+  paper [1], I-JEPA [2], then V-JEPA / V-JEPA 2 [3][4], which validated latent
+  prediction on video at scale. Janus is a miniature online instance of that recipe.
+- **EMA target encoder + stop-gradient** is BYOL [5] (momentum encoders trace
+  back further, to MoCo).
+- **Variance + covariance anti-collapse terms** are VICReg [6].
+- **Effective rank as the collapse tripwire** follows RankMe [7]: exp of the
+  entropy of the normalized singular-value spectrum.
+- **The reservoir** is Vitter's Algorithm R [8]; replay as anti-forgetting is
+  the continual-learning staple [9].
+- **Skill vs a copy baseline** is borrowed from operational weather forecasting,
+  where persistence ("tomorrow looks like today") is the standard reference a
+  forecast must beat [10]. The copy baseline is persistence.
+- **Learning at inference time** has a lineage in test-time training [11];
+  Janus differs in that adaptation never stops and is never reset per-sample.
+- **The two-process topology** — serving engine, training engine, weight bridge —
+  is the shape of async RL post-training infrastructure (slime, verl/HybridFlow
+  [12]) at ~1/1000 scale, with frames instead of tokens.
+
+What the literature did not hand us: scoring each prediction in the weight
+version that made it (the ~83% cross-swap artifact), the replay-ratio
+memorization failure against a slow live stream, and the frozen/no-replay
+honesty harness. Those came from instrumenting this system.
+
+[1] LeCun 2022, *A Path Towards Autonomous Machine Intelligence*. openreview.net/forum?id=BZ5a1r-kVsf
+[2] Assran et al. 2023, *Self-Supervised Learning from Images with a Joint-Embedding Predictive Architecture*. arXiv:2301.08243
+[3] Bardes et al. 2024, *Revisiting Feature Prediction for Learning Visual Representations from Video* (V-JEPA). arXiv:2404.08471
+[4] Assran et al. 2025, *V-JEPA 2: Self-Supervised Video Models Enable Understanding, Prediction and Planning*. arXiv:2506.09985
+[5] Grill et al. 2020, *Bootstrap your own latent*. NeurIPS 2020. arXiv:2006.07733
+[6] Bardes, Ponce & LeCun 2022, *VICReg*. ICLR 2022. arXiv:2105.04906
+[7] Garrido et al. 2023, *RankMe*. ICML 2023. arXiv:2210.02885
+[8] Vitter 1985, *Random Sampling with a Reservoir*. ACM TOMS 11(1):37–57.
+[9] Rolnick et al. 2019, *Experience Replay for Continual Learning*. NeurIPS 2019. arXiv:1811.11682
+[10] Murphy 1992, *Climatology, Persistence, and Their Linear Combination as Standards of Reference in Skill Scores*. Weather and Forecasting 7(4):692–698.
+[11] Sun et al. 2020, *Test-Time Training with Self-Supervision for Generalization under Distribution Shifts*. ICML 2020. arXiv:1909.13231
+[12] Sheng et al. 2024, *HybridFlow: A Flexible and Efficient RLHF Framework*. EuroSys 2025. arXiv:2409.19256 — github.com/THUDM/slime, github.com/verl-project/verl
+
 ## Layout
 
 | file | role |

@@ -1,0 +1,193 @@
+{
+  "config": {
+    "steps": 1500,
+    "publish_every": 50,
+    "batch": 64,
+    "lr": 0.0003,
+    "weight_decay": 1e-06,
+    "ema_decay": 0.999,
+    "steps_per_frame": 3.0,
+    "device": "cuda:1",
+    "seed": 0
+  },
+  "numel": 2752768,
+  "dense_fp32_bytes": 11011072,
+  "dense_fp16_bytes": 5505536,
+  "bitmask_floor_bytes": 344096,
+  "publishes": 30,
+  "dense_publish_ms_mean": 6.500971891606848,
+  "sparse_encode_ms_mean": 11.506066467457762,
+  "thresholds": {
+    "exact": {
+      "changed_frac_mean": 0.9999989949510214,
+      "sparsity_mean": 1.0050489785973227e-06,
+      "bytes_mean": {
+        "idx32_val32": 22022121.866666667,
+        "bitmask_val32": 11355156.933333334,
+        "bitmask_val16": 5849626.466666667
+      },
+      "compression_vs_dense_fp32": {
+        "idx32_val32": 0.5000005025249944,
+        "bitmask_val32": 0.9696979147577199,
+        "bitmask_val16": 1.8823547217493557
+      },
+      "drift_l2_final": 3.2539573082718846e-10,
+      "drift_max_final": 9.313225746154785e-10,
+      "naive_drift_l2_final": 3.2794371400512663e-09
+    },
+    "abs_1e-7": {
+      "changed_frac_mean": 0.9998807987693357,
+      "sparsity_mean": 0.00011920123066433419,
+      "bytes_mean": {
+        "idx32_val32": 22019518.933333334,
+        "bitmask_val32": 11353855.466666667,
+        "bitmask_val16": 5848975.733333333
+      },
+      "compression_vs_dense_fp32": {
+        "idx32_val32": 0.5000596077206458,
+        "bitmask_val32": 0.9698090690274302,
+        "bitmask_val16": 1.8825641449062374
+      },
+      "drift_l2_final": 1.3645424951614881e-08,
+      "drift_max_final": 9.918585419654846e-08,
+      "naive_drift_l2_final": 7.823262897955646e-08
+    },
+    "abs_1e-6": {
+      "changed_frac_mean": 0.9988009160234353,
+      "sparsity_mean": 0.0011990839765646522,
+      "bytes_mean": {
+        "idx32_val32": 21995737.6,
+        "bitmask_val32": 11341964.8,
+        "bitmask_val16": 5843030.4
+      },
+      "compression_vs_dense_fp32": {
+        "idx32_val32": 0.5006002617525315,
+        "bitmask_val32": 0.9708257955447013,
+        "bitmask_val16": 1.8844796700013746
+      },
+      "drift_l2_final": 4.210864584425392e-07,
+      "drift_max_final": 9.997747838497162e-07,
+      "naive_drift_l2_final": 2.470602046410415e-06
+    },
+    "abs_1e-5": {
+      "changed_frac_mean": 0.9880559495024644,
+      "sparsity_mean": 0.011944050497535552,
+      "bytes_mean": {
+        "idx32_val32": 21759110.4,
+        "bitmask_val32": 11223651.2,
+        "bitmask_val16": 5783873.6
+      },
+      "compression_vs_dense_fp32": {
+        "idx32_val32": 0.5060442176900762,
+        "bitmask_val32": 0.9810597107650674,
+        "bitmask_val16": 1.9037539132943708
+      },
+      "drift_l2_final": 1.3178991953194948e-05,
+      "drift_max_final": 9.998679161071777e-06,
+      "naive_drift_l2_final": 7.968209524728772e-05
+    },
+    "abs_1e-4": {
+      "changed_frac_mean": 0.9033115274032053,
+      "sparsity_mean": 0.0966884725967947,
+      "bytes_mean": {
+        "idx32_val32": 19892856.533333335,
+        "bitmask_val32": 10290524.266666668,
+        "bitmask_val16": 5317310.133333334
+      },
+      "compression_vs_dense_fp32": {
+        "idx32_val32": 0.5535188966727513,
+        "bitmask_val32": 1.0700205076691136,
+        "bitmask_val16": 2.070797400169198
+      },
+      "drift_l2_final": 0.00039497151780955466,
+      "drift_max_final": 9.999983012676239e-05,
+      "naive_drift_l2_final": 0.004299913078407516
+    },
+    "fp16_rel": {
+      "changed_frac_mean": 0.9885024697565021,
+      "sparsity_mean": 0.011497530243497867,
+      "bytes_mean": {
+        "idx32_val32": 21768943.733333334,
+        "bitmask_val32": 11228567.866666667,
+        "bitmask_val16": 5786331.933333334
+      },
+      "compression_vs_dense_fp32": {
+        "idx32_val32": 0.5058156305094159,
+        "bitmask_val32": 0.9806301329564628,
+        "bitmask_val16": 1.902945100084649
+      },
+      "drift_l2_final": 0.00013607124190001736,
+      "drift_max_final": 0.0005252361297607422,
+      "naive_drift_l2_final": 0.001818501355327965
+    },
+    "bf16_rel": {
+      "changed_frac_mean": 0.9263270521404879,
+      "sparsity_mean": 0.07367294785951206,
+      "bytes_mean": {
+        "idx32_val32": 20399707.733333334,
+        "bitmask_val32": 10543949.866666667,
+        "bitmask_val16": 5444022.933333334
+      },
+      "compression_vs_dense_fp32": {
+        "idx32_val32": 0.5397661644930233,
+        "bitmask_val32": 1.0443023856562594,
+        "bitmask_val16": 2.0225983863109858
+      },
+      "drift_l2_final": 0.0015911977343477802,
+      "drift_max_final": 0.004232883453369141,
+      "naive_drift_l2_final": 0.014199316253504077
+    }
+  },
+  "per_key_changed_fp16_rel": {
+    "encoder.head.1.bias": 0.9805989583333333,
+    "encoder.head.1.weight": 0.9901214599609375,
+    "encoder.head.2.bias": 0.997265625,
+    "encoder.head.2.weight": 0.82265625,
+    "encoder.tower.0.bias": 0.9427083333333334,
+    "encoder.tower.0.weight": 0.9349151234567901,
+    "encoder.tower.1.bias": 0.9989583333333333,
+    "encoder.tower.1.weight": 0.5229166666666667,
+    "encoder.tower.10.bias": 0.9971354166666667,
+    "encoder.tower.10.weight": 0.643359375,
+    "encoder.tower.3.bias": 0.9645833333333333,
+    "encoder.tower.3.weight": 0.9790979456018519,
+    "encoder.tower.4.bias": 0.9989583333333333,
+    "encoder.tower.4.weight": 0.7166666666666667,
+    "encoder.tower.6.bias": 0.9838541666666667,
+    "encoder.tower.6.weight": 0.9915898075810186,
+    "encoder.tower.7.bias": 0.99921875,
+    "encoder.tower.7.weight": 0.6627604166666666,
+    "encoder.tower.9.bias": 0.987109375,
+    "encoder.tower.9.weight": 0.9955929226345486,
+    "predictor.net.0.bias": 0.9932291666666667,
+    "predictor.net.0.weight": 0.9950485229492188,
+    "predictor.net.1.bias": 0.9991536458333333,
+    "predictor.net.1.weight": 0.77607421875,
+    "predictor.net.3.bias": 0.99541015625,
+    "predictor.net.3.weight": 0.9962055206298828,
+    "predictor.net.4.bias": 0.99521484375,
+    "predictor.net.4.weight": 0.8356770833333333,
+    "predictor.net.6.bias": 0.998046875,
+    "predictor.net.6.weight": 0.9957841237386068,
+    "target.head.1.bias": 0.8294270833333334,
+    "target.head.1.weight": 0.9323557535807292,
+    "target.head.2.bias": 0.9997395833333333,
+    "target.head.2.weight": 0.15325520833333334,
+    "target.tower.0.bias": 0.8895833333333333,
+    "target.tower.0.weight": 0.7890046296296297,
+    "target.tower.1.bias": 0.9989583333333333,
+    "target.tower.1.weight": 0.26458333333333334,
+    "target.tower.10.bias": 1.0,
+    "target.tower.10.weight": 0.035807291666666664,
+    "target.tower.3.bias": 0.8578125,
+    "target.tower.3.weight": 0.8893934461805556,
+    "target.tower.4.bias": 1.0,
+    "target.tower.4.weight": 0.325,
+    "target.tower.6.bias": 0.85078125,
+    "target.tower.6.weight": 0.940517849392361,
+    "target.tower.7.bias": 1.0,
+    "target.tower.7.weight": 0.0953125,
+    "target.tower.9.bias": 0.914453125,
+    "target.tower.9.weight": 0.9684889051649306
+  }
+}
