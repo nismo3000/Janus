@@ -7,3 +7,4 @@ __pycache__/
 runs/
 *.pt
 *.jsonl
+docs/*.mp4
