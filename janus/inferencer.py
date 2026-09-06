@@ -5,24 +5,143 @@ future. When that future actually arrives, the prediction it made back then is
 scored against it -- so the thing it served becomes the label it learns from, with
 no annotation anywhere in the loop.
 
-It also hot-swaps weights off the bus between frames. The swap is a plain
-state_dict copy of a few tens of MB, which at 30 fps fits comfortably inside the
-frame budget.
+It also hot-swaps weights off the bus between frames. The swap itself is a pointer
+swap: the model's parameters are views into one of two device-side flat buffers,
+and a background thread stages the next version (bus -> pinned host -> one fused
+H2D copy on a side stream) into whichever buffer is idle. The frame thread never
+copies weights; it just re-binds ~50 views and moves on.
 """
 
-import copy
 import json
 import math
+import threading
 import time
-from collections import OrderedDict, deque
+from collections import deque
+from typing import Optional
 
 import numpy as np
 import torch
 
-from .bus import FrameRing, WeightBus
+from .bus import FlatLayout, FrameRing, WeightBus
 from .frames import to_model_input
-from .model import WorldModel, prediction_error
+from .model import Encoder, WorldModel, prediction_error
 from .sources import open_stream
+
+
+class WeightFetcher:
+    """Stages new weight versions onto the device without touching the frame thread.
+
+    Two device buffers; the model is bound to one, the other is the landing zone.
+    The fetcher fills the landing zone on its own CUDA stream and hands it over via
+    an event; the frame thread rebinds, then records a `consumed` event so the
+    fetcher never overwrites a buffer the GPU may still be reading.
+    """
+
+    def __init__(self, bus: WeightBus, layout: FlatLayout, device: torch.device,
+                 init_version: int, poll_s: float = 0.1):
+        self.bus, self.layout, self.device, self.poll_s = bus, layout, device, poll_s
+        self.staging = torch.empty(layout.numel, dtype=torch.float32).pin_memory()
+        self.bufs = [torch.empty(layout.numel, dtype=torch.float32, device=device)
+                     for _ in range(2)]
+        self.active = 0                                 # buffer the model is bound to
+        self.version = init_version
+        self.stream = torch.cuda.Stream(device=device)
+        self.landed = torch.cuda.Event()                # H2D into the idle buffer done
+        self.consumed = torch.cuda.Event()              # frame thread finished with old buffer
+        self.consumed.record(torch.cuda.current_stream(device))   # trivially satisfied at start
+        self._ready: Optional[int] = None               # version waiting in idle buffer
+        self._lock = threading.Lock()
+        self._stop = threading.Event()
+        self._thread = threading.Thread(target=self._run, name="weight-fetcher", daemon=True)
+
+    def start(self) -> "WeightFetcher":
+        self._thread.start()
+        return self
+
+    def stop(self) -> None:
+        self._stop.set()
+        self._thread.join(timeout=2.0)
+
+    def _run(self) -> None:
+        torch.cuda.set_device(self.device)
+        while not self._stop.is_set():
+            with self._lock:
+                pending = self._ready is not None
+            if pending:                                 # landing zone still occupied
+                time.sleep(self.poll_s)
+                continue
+            v = self.bus.pull_into(self.staging, since=self.version)
+            if v is None:
+                time.sleep(self.poll_s)
+                continue
+            # Choose the landing buffer under the lock so a concurrent swap on the
+            # frame thread can't flip `active` between our read and our copy.
+            with self._lock:
+                idle = 1 - self.active
+                with torch.cuda.stream(self.stream):
+                    self.stream.wait_event(self.consumed)   # old readers of `idle` are done
+                    self.bufs[idle].copy_(self.staging, non_blocking=True)
+                    self.landed.record(self.stream)
+            self.landed.synchronize()                   # keep the pinned buffer safe to reuse
+            with self._lock:
+                self._ready = v
+
+    def swap_if_ready(self, model: torch.nn.Module) -> Optional[int]:
+        """Frame thread: rebind `model` onto the newly landed buffer. ~50 pointer writes."""
+        with self._lock:
+            v = self._ready
+            if v is None:
+                return None
+            self._ready = None
+            stream = torch.cuda.current_stream(self.device)
+            stream.wait_event(self.landed)
+            self.active = 1 - self.active
+            self.layout.bind(model, self.bufs[self.active])
+            self.version = v
+            self.consumed.record(stream)
+        return v
+
+    @property
+    def current(self) -> torch.Tensor:
+        return self.bufs[self.active]
+
+
+class ScorerRing:
+    """The last few target encoders, so a prediction is always scored by the weight
+    version that made it. Device-side ring of flat vectors + one Encoder bound to
+    whichever slot is being asked for; no module copies anywhere.
+    """
+
+    def __init__(self, layout: FlatLayout, template: Encoder, device: torch.device,
+                 depth: int = 4):
+        self.layout = layout
+        self.start, self.end = layout.span("target.")
+        self.slots = torch.empty((depth, self.end - self.start), dtype=torch.float32,
+                                 device=device)
+        self.depth = depth
+        self.versions = [None] * depth                  # slot -> version
+        self.enc = template                             # rebound per lookup
+        self.bound: Optional[int] = None                # slot the encoder currently views
+        self.next = 0
+
+    def snapshot(self, version: int, flat: torch.Tensor) -> None:
+        """Copy the target span out of `flat` (device, current stream) into the ring."""
+        s = self.next
+        self.slots[s].copy_(flat[self.start:self.end])
+        self.versions[s] = version
+        if self.bound == s:
+            self.bound = None                           # views now stale; rebind on use
+        self.next = (s + 1) % self.depth
+
+    def get(self, version: int) -> Optional[Encoder]:
+        try:
+            s = self.versions.index(version)
+        except ValueError:
+            return None
+        if self.bound != s:
+            self.layout.bind(self.enc, self.slots[s], prefix="target.")
+            self.bound = s
+        return self.enc
 
 
 class RunningNorm:
@@ -47,11 +166,21 @@ class RunningNorm:
 
 def inferencer_main(cfg, ring: FrameRing, bus: WeightBus, stop_event, run_dir: str) -> None:
     torch.manual_seed(cfg.seed)
+    torch.set_num_threads(cfg.infer_threads)
     device = torch.device(cfg.device_infer)
+    torch.cuda.set_device(device)
 
     model = WorldModel(cfg.dim, cfg.width, cfg.context_frames, cfg.hidden, cfg.ema_decay).to(device)
     version = bus.pull(model, since=-1) or 0
     model.eval()
+
+    # From here on the model's parameters are views into the fetcher's active
+    # device buffer; the original .to(device) tensors are dropped.
+    layout = FlatLayout(model)
+    fetcher = WeightFetcher(bus, layout, device, init_version=version)
+    fetcher.current.copy_(torch.cat([model.state_dict()[k].reshape(-1) for k, *_ in layout.entries]))
+    layout.bind(model, fetcher.current)
+    fetcher.start()
 
     stream = open_stream(cfg)
     ctx = deque(maxlen=cfg.context_frames)
@@ -63,18 +192,11 @@ def inferencer_main(cfg, ring: FrameRing, bus: WeightBus, stop_event, run_dir: s
     # one. Scoring across that swap measures the model's own drift as if it were
     # novelty, so we keep the recent target encoders and always score a prediction
     # in the coordinate frame that produced it.
-    scorers: "OrderedDict[int, torch.nn.Module]" = OrderedDict()
-
-    def snapshot(v: int) -> None:
-        scorers[v] = copy.deepcopy(model.target).eval()
-        while len(scorers) > 4:
-            scorers.popitem(last=False)
-
-    snapshot(version)
+    scorers = ScorerRing(layout, Encoder(cfg.dim, cfg.width).to(device).eval(), device, depth=4)
+    scorers.snapshot(version, fetcher.current)
 
     log = open(f"{run_dir}/infer.jsonl", "w", buffering=1)
     t0 = time.time()
-    last_pull = t0
     last_beat = t0
     frames = 0
     swaps = 0
@@ -97,7 +219,9 @@ def inferencer_main(cfg, ring: FrameRing, bus: WeightBus, stop_event, run_dir: s
             asked_v = None
             if idx in pending:                     # the future arrived: score the old prediction
                 pred_then, z_then, asked_v = pending.pop(idx)
-                enc = scorers.get(asked_v, model.target)
+                enc = scorers.get(asked_v)
+                if enc is None:                    # version aged out of the ring
+                    enc = model.target
                 z_tgt = enc(x_now)
                 surprise = float(prediction_error(pred_then, z_tgt).item())
                 # Copy baseline: "the future looks like now". Beating it is the
@@ -109,14 +233,14 @@ def inferencer_main(cfg, ring: FrameRing, bus: WeightBus, stop_event, run_dir: s
                 pred, z_now = model.predict(to_model_input(stacked, device))
                 pending[idx + cfg.horizon_frames] = (pred, z_now, version)
 
-            now = time.time()
-            if now - last_pull >= 0.5:             # hot-swap in fresher weights
-                v = bus.pull(model, since=version)
-                if v is not None:
-                    version, swaps = v, swaps + 1
-                    snapshot(version)
-                last_pull = now
+            # Hot-swap: the fetcher has already landed the new version on-device;
+            # this is a pointer rebind plus one D2D copy of the target span.
+            swapped = fetcher.swap_if_ready(model)
+            if swapped is not None:
+                version, swaps = swapped, swaps + 1
+                scorers.snapshot(version, fetcher.current)
 
+            now = time.time()
             frames += 1
             if surprise is not None:
                 z = norm.update(surprise)
@@ -130,6 +254,7 @@ def inferencer_main(cfg, ring: FrameRing, bus: WeightBus, stop_event, run_dir: s
                     "anomaly": meta.get("anomaly", 0),
                     "version": version,
                     "asked_version": asked_v,
+                    "swap": int(swapped is not None),
                     "ms": (time.perf_counter() - f_start) * 1e3,
                 }) + "\n")
 
@@ -138,6 +263,7 @@ def inferencer_main(cfg, ring: FrameRing, bus: WeightBus, stop_event, run_dir: s
                       f"weight_v={version}  swaps={swaps}", flush=True)
                 last_beat = now
 
+    fetcher.stop()
     # Drop any predictions whose future never arrived, so the run ends clean.
     pending.clear()
     log.close()

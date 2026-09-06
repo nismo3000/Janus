@@ -27,6 +27,8 @@ class Config:
     # --- learner ---
     device_infer: str = "cuda:0"
     device_learn: str = "cuda:1"
+    infer_threads: int = 2          # CPU threads per process. Torch defaults to every
+    learn_threads: int = 8          # core in *both* processes and the frame loop starves.
     batch: int = 64
     lr: float = 3e-4
     weight_decay: float = 1e-6

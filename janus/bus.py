@@ -54,6 +54,56 @@ class FrameRing:
         return self.buf[slots]
 
 
+class FlatLayout:
+    """Where each float state tensor lives inside the flattened weight vector.
+
+    The same sorted-key order the bus publishes in, so a flat vector can be bound
+    straight onto a model as views: after `bind`, the model's parameters *are*
+    slices of `flat`, and swapping weights is a pointer swap rather than a copy.
+    """
+
+    def __init__(self, model: nn.Module):
+        sd = model.state_dict()
+        self.entries = []                       # (key, offset, numel, shape)
+        off = 0
+        for k in float_state_keys(model):
+            t = sd[k]
+            self.entries.append((k, off, t.numel(), tuple(t.shape)))
+            off += t.numel()
+        self.numel = off
+
+    def span(self, prefix: str) -> tuple:
+        """[start, end) of every key under `prefix` (keys are sorted, so contiguous)."""
+        hits = [(o, o + n) for k, o, n, _ in self.entries if k.startswith(prefix)]
+        if not hits:
+            raise KeyError(prefix)
+        start, end = hits[0][0], hits[-1][1]
+        assert end - start == sum(b - a for a, b in hits), f"{prefix} not contiguous"
+        return start, end
+
+    def bind(self, model: nn.Module, flat: torch.Tensor, prefix: str = "") -> None:
+        """Point every float parameter/buffer of `model` at its slice of `flat`.
+
+        `prefix` lets a sub-module (e.g. `model.target`) bind against a flat vector
+        that holds only that sub-module's span.
+        """
+        params = dict(model.named_parameters())
+        bufs = dict(model.named_buffers())
+        base = self.span(prefix)[0] if prefix else 0
+        for k, off, n, shape in self.entries:
+            if prefix and not k.startswith(prefix):
+                continue
+            name = k[len(prefix):] if prefix else k
+            view = flat[off - base:off - base + n].view(shape)
+            if name in params:
+                params[name].data = view
+            elif name in bufs:
+                mod_name, _, buf_name = name.rpartition(".")
+                model.get_submodule(mod_name)._buffers[buf_name] = view
+            else:
+                raise KeyError(name)
+
+
 class WeightBus:
     """Double-buffered publish/subscribe for a flattened float state_dict."""
 
@@ -78,6 +128,16 @@ class WeightBus:
     def current_version(self) -> int:
         with self.version.get_lock():
             return self.version.value
+
+    def pull_into(self, dst: torch.Tensor, since: int) -> Optional[int]:
+        """Copy the latest published vector into `dst` (a CPU tensor, ideally pinned)
+        if newer than `since`. The lock is held only for the memcpy."""
+        with self.version.get_lock():
+            v = self.version.value
+            if v <= since:
+                return None
+            dst.copy_(self.slots[v % 2])
+        return v
 
     def pull(self, model: nn.Module, since: int) -> Optional[int]:
         """Load the latest published weights into `model` if newer than `since`."""

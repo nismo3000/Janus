@@ -41,6 +41,7 @@ def _build_clips(ring: FrameRing, cfg, ts: List[int]) -> torch.Tensor:
 
 def learner_main(cfg, ring: FrameRing, bus: WeightBus, stop_event, run_dir: str) -> None:
     torch.manual_seed(cfg.seed + 1)
+    torch.set_num_threads(cfg.learn_threads)
     g = torch.Generator().manual_seed(cfg.seed + 7)
     device = torch.device(cfg.device_learn)
 

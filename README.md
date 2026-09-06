@@ -107,15 +107,15 @@ anecdotal — there is ground truth to compute an AUC against.
 | metric | live | frozen ctrl | no-replay |
 |---|---:|---:|---:|
 | served fps | 29.95 | 29.95 | 29.95 |
-| inference ms (p50 / p99) | 1.58 / 15.25 | 1.73 / 1.97 | 1.62 / 15.13 |
-| gradient steps (while serving) | 26,855 | 0 | 26,938 |
+| inference ms (p50 / p99) | 1.67 / 2.67 | 1.75 / 1.96 | 1.60 / 2.38 |
+| gradient steps (while serving) | 26,941 | 0 | 26,946 |
 | weight versions served | 539 | 1 | 539 |
-| **skill vs copy baseline** | **+0.248** | −15.60 | +0.201 |
-| skill, last third | +0.383 | −17.75 | +0.219 |
-| **novelty AUC** | **0.879** | 0.451 | 0.773 |
-| surprise: normal → anomaly | 0.574 → 0.849 | 0.955 → 0.946 | 0.635 → 0.842 |
-| probe error on early clips | **0.567** | — | 0.817 |
-| embedding effective rank (min / final) | 19.8 / 60.3 | — | 31.9 / 60.7 |
+| **skill vs copy baseline** | **+0.246** | −15.60 | +0.194 |
+| skill, last third | +0.373 | −17.75 | +0.218 |
+| **novelty AUC** | **0.872** | 0.451 | 0.811 |
+| surprise: normal → anomaly | 0.572 → 0.843 | 0.955 → 0.946 | 0.640 → 0.863 |
+| probe error on early clips | **0.531** | — | 0.802 |
+| embedding effective rank (min / final) | 19.1 / 60.6 | — | 31.9 / 59.7 |
 
 All six claims pass. Reading the table:
 
@@ -129,10 +129,18 @@ All six claims pass. Reading the table:
   (26,938 steps) and lands respectable skill, but probe error on early clips is
   0.817 vs 0.567 with replay — it is quietly forgetting the world it saw first. Its
   novelty AUC is correspondingly worse (0.773 vs 0.879).
-- **Hot-swapping is not free.** p99 inference latency is 15.25 ms live vs 1.97 ms
-  frozen — that tail is the 11 MB weight copy landing between frames. It fits inside
-  the 33 ms budget at 30 fps, but it would not at 120 fps, and that is the number to
-  watch when this moves to a faster stream.
+- **Hot-swapping is now ~free.** p99 inference latency is 2.67 ms live vs 1.96 ms
+  frozen. The first version of this loop showed 15 ms — and the interesting part is
+  that the 11 MB weight copy was never the cause. Isolated, the old path cost ~5 ms;
+  in situ it cost 10–25 ms because both processes ran torch's default 16 CPU threads
+  on a 16-core box and the frame thread kept getting descheduled. Fix, in order of
+  effect: cap threads per process (`infer_threads=2`, `learn_threads=8`); stage new
+  weights off the frame thread (a fetcher thread does bus → pinned host → one fused
+  H2D on a side stream into an idle device buffer); make the model's parameters
+  *views* into a device double-buffer so the swap is ~50 pointer rebinds (~0.3 ms);
+  and keep the per-version scorers as a device ring instead of `deepcopy`ing a module.
+  Swap frames went from p50/p99 10/25 ms to 2.0/3.5 ms. The thread lesson gets
+  sharper on a 6-core Jetson, not softer.
 
 ## Prior work
 
@@ -182,7 +190,7 @@ honesty harness. Those came from instrumenting this system.
 | file | role |
 |---|---|
 | `janus/run.py` | launcher; spawns both processes, sizes the weight bus |
-| `janus/inferencer.py` | serves surprise at frame rate, hot-swaps weights |
+| `janus/inferencer.py` | serves surprise at frame rate; fetcher thread + device double-buffer for swaps |
 | `janus/learner.py` | continuous training loop, replay, publishing |
 | `janus/model.py` | encoder / predictor / EMA target, VICReg, effective rank |
 | `janus/bus.py` | shared frame ring, seqlock weight bus, reservoir |
@@ -211,5 +219,7 @@ Open ends, in order of interest:
 2. **Real video.** Everything above is synthetic. `--source x11` and `--source file`
    exist and run, but nothing here has been measured on natural video, where there is
    no ground-truth anomaly label to compute an AUC against.
-3. **Latency headroom.** The 15 ms p99 weight-swap spike caps the practical frame
-   rate; a delta or half-precision publish would cut it.
+3. **Edge port.** The swap path is now a pointer rebind and the learner is throttle-
+   bound, so the next real number is on Jetson: served fps vs gradient steps/s vs
+   watts on one time-sliced GPU, with a TensorRT inferencer and a PyTorch learner
+   sharing weights across the engine boundary.
