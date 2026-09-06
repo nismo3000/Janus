@@ -25,17 +25,22 @@ from .model import float_state_keys
 class FrameRing:
     """Lock-free single-writer ring of uint8 frames, indexed by a monotonic counter."""
 
-    def __init__(self, capacity: int, res: int):
+    def __init__(self, capacity: int, res: int, action_dim: int = 0):
         self.capacity = capacity
         self.res = res
+        self.action_dim = action_dim
         self.buf = torch.zeros((capacity, res, res, 3), dtype=torch.uint8).share_memory_()
+        # The agent's command at each frame rides alongside the pixels, same index.
+        self.act = torch.zeros((capacity, max(1, action_dim)), dtype=torch.float32).share_memory_()
         self.count = mp.Value("q", 0)   # total frames ever written (monotonic)
 
-    def write(self, frame_u8: torch.Tensor) -> int:
+    def write(self, frame_u8: torch.Tensor, action: Optional[torch.Tensor] = None) -> int:
         with self.count.get_lock():
             idx = self.count.value
             self.count.value = idx + 1
         self.buf[idx % self.capacity] = frame_u8
+        if action is not None and self.action_dim:
+            self.act[idx % self.capacity] = action
         return idx
 
     def total(self) -> int:
@@ -52,6 +57,10 @@ class FrameRing:
     def gather(self, global_indices: List[int]) -> torch.Tensor:
         slots = [i % self.capacity for i in global_indices]
         return self.buf[slots]
+
+    def gather_actions(self, global_indices: List[int]) -> torch.Tensor:
+        slots = [i % self.capacity for i in global_indices]
+        return self.act[slots]
 
 
 class FlatLayout:
@@ -166,26 +175,31 @@ class Reservoir:
     measuring drift rather than novelty.
     """
 
-    def __init__(self, size: int, clip_len: int, res: int, generator: torch.Generator):
+    def __init__(self, size: int, clip_len: int, res: int, generator: torch.Generator,
+                 action_dim: int = 0):
         self.size = size
         self.clips = torch.zeros((size, clip_len, res, res, 3), dtype=torch.uint8)
+        self.acts = torch.zeros((size, max(1, action_dim)), dtype=torch.float32)
         self.n_filled = 0
         self.n_seen = 0
         self.g = generator
 
-    def offer(self, clip_u8: torch.Tensor) -> None:
+    def offer(self, clip_u8: torch.Tensor, action: Optional[torch.Tensor] = None) -> None:
         self.n_seen += 1
         if self.n_filled < self.size:
-            self.clips[self.n_filled] = clip_u8
+            j = self.n_filled
             self.n_filled += 1
-            return
-        j = int(torch.randint(0, self.n_seen, (1,), generator=self.g).item())
-        if j < self.size:
-            self.clips[j] = clip_u8
+        else:
+            j = int(torch.randint(0, self.n_seen, (1,), generator=self.g).item())
+            if j >= self.size:
+                return
+        self.clips[j] = clip_u8
+        if action is not None:
+            self.acts[j] = action
 
-    def sample(self, k: int) -> Optional[torch.Tensor]:
+    def sample(self, k: int) -> Optional[tuple]:
         if self.n_filled == 0:
             return None
         k = min(k, self.n_filled)
         idx = torch.randint(0, self.n_filled, (k,), generator=self.g)
-        return self.clips[idx]
+        return self.clips[idx], self.acts[idx]

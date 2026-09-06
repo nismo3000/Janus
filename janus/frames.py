@@ -10,12 +10,18 @@ def to_model_input(frames_u8: torch.Tensor, device: torch.device) -> torch.Tenso
     return x.movedim(-1, -3).contiguous()
 
 
-def augment_clips(x: torch.Tensor, gen: torch.Generator, scale_min: float = 0.65) -> torch.Tensor:
+def augment_clips(x: torch.Tensor, gen: torch.Generator, actions: torch.Tensor = None,
+                  scale_min: float = 0.65):
     """Random crop / flip / photometric jitter on (B, T, 3, R, R) clips.
 
     The transform is drawn per *clip* and applied identically to every frame in
     it. Jittering frames independently would destroy the very motion the model is
     supposed to predict -- the augmentation has to move the camera, not the world.
+
+    If `actions` (B, A) is given it is kept consistent with what the pixels now
+    do: a horizontal flip negates pan_x, and a crop of scale s magnifies any pan
+    by 1/s (the same world motion covers more of the frame). Zoom is relative and
+    unaffected. Returns (x, actions).
     """
     b, t = x.shape[:2]
     dev = x.device
@@ -40,4 +46,10 @@ def augment_clips(x: torch.Tensor, gen: torch.Generator, scale_min: float = 0.65
     contrast = r(0.8, 1.2).repeat_interleave(t).view(-1, 1, 1, 1)
     bright = r(-0.15, 0.15).repeat_interleave(t).view(-1, 1, 1, 1)
     out = (out * contrast + bright).clamp_(-1.0, 1.0)
-    return out.view_as(x)
+    out = out.view_as(x)
+    if actions is None:
+        return out
+    actions = actions.clone().to(dev)
+    actions[:, 0] = actions[:, 0] * flip / s
+    actions[:, 1] = actions[:, 1] / s
+    return out, actions

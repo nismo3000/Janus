@@ -8,7 +8,7 @@ import json
 @dataclass
 class Config:
     # --- stream ---
-    source: str = "synthetic"       # synthetic | x11 | file
+    source: str = "synthetic"       # synthetic | camera | x11 | file
     source_path: str = ""           # video path when source == "file"
     fps: float = 30.0
     res: int = 96                   # frames are resized to res x res
@@ -16,6 +16,10 @@ class Config:
     # --- prediction horizon ---
     horizon_frames: int = 15        # predict the embedding this many frames ahead (~0.5s @ 30fps)
     context_frames: int = 2         # how many past frames condition the prediction
+
+    # --- actions ---
+    action_dim: int = 0             # >0: predictor is conditioned on the agent's own command
+    use_actions: bool = True        # ablation: keep the action input but feed zeros
 
     # --- model ---
     dim: int = 256

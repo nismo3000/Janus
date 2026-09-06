@@ -9,7 +9,7 @@ No BatchNorm anywhere: the frame stream is violently non-iid, so batch statistic
 would drift with the scene and leak the future into the target.
 """
 
-from typing import Tuple
+from typing import Optional, Tuple
 
 import torch
 import torch.nn as nn
@@ -40,12 +40,18 @@ class Encoder(nn.Module):
 
 
 class Predictor(nn.Module):
-    """(context embeddings) -> predicted embedding at t + horizon."""
+    """(context embeddings [, action]) -> predicted embedding at t + horizon.
 
-    def __init__(self, dim: int = 256, context: int = 2, hidden: int = 1024):
+    The action is the agent's own commanded motion over the horizon. Without it
+    the predictor has to treat the agent's decisions as unexplained variance,
+    and surprise conflates "the world did something" with "I did something".
+    """
+
+    def __init__(self, dim: int = 256, context: int = 2, hidden: int = 1024, action_dim: int = 0):
         super().__init__()
+        self.action_dim = action_dim
         self.net = nn.Sequential(
-            nn.Linear(dim * context, hidden),
+            nn.Linear(dim * context + action_dim, hidden),
             nn.LayerNorm(hidden),
             nn.SiLU(),
             nn.Linear(hidden, hidden),
@@ -54,21 +60,25 @@ class Predictor(nn.Module):
             nn.Linear(hidden, dim),
         )
 
-    def forward(self, ctx: torch.Tensor) -> torch.Tensor:
-        return self.net(ctx.flatten(1))
+    def forward(self, ctx: torch.Tensor, action: Optional[torch.Tensor] = None) -> torch.Tensor:
+        h = ctx.flatten(1)
+        if self.action_dim:
+            h = torch.cat([h, action], dim=1)
+        return self.net(h)
 
 
 class WorldModel(nn.Module):
     """Online encoder + predictor, plus the EMA target encoder that supervises it."""
 
     def __init__(self, dim: int = 256, width: int = 32, context: int = 2, hidden: int = 1024,
-                 ema_decay: float = 0.996):
+                 ema_decay: float = 0.996, action_dim: int = 0):
         super().__init__()
         self.dim = dim
         self.context = context
         self.ema_decay = ema_decay
+        self.action_dim = action_dim
         self.encoder = Encoder(dim, width)
-        self.predictor = Predictor(dim, context, hidden)
+        self.predictor = Predictor(dim, context, hidden, action_dim)
         self.target = Encoder(dim, width)
         self.target.load_state_dict(self.encoder.state_dict())
         for p in self.target.parameters():
@@ -88,9 +98,16 @@ class WorldModel(nn.Module):
         z = self.encoder(ctx_frames.flatten(0, 1))
         return z.view(b, c, -1)
 
-    def predict(self, ctx_frames: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+    def predict(self, ctx_frames: torch.Tensor,
+                action: Optional[torch.Tensor] = None) -> Tuple[torch.Tensor, torch.Tensor]:
         z = self.encode_context(ctx_frames)
-        return self.predictor(z), z[:, -1]
+        return self.predictor(z, action), z[:, -1]
+
+    def predict_from_z(self, z_ctx: torch.Tensor,
+                       action: Optional[torch.Tensor] = None) -> torch.Tensor:
+        """z_ctx: (B, C, dim) already-encoded context -- lets the server encode
+        each frame once and reuse it as context for the next tick."""
+        return self.predictor(z_ctx, action)
 
     @torch.no_grad()
     def encode_target(self, future_frame: torch.Tensor) -> torch.Tensor:

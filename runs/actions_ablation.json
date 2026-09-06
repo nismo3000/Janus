@@ -1,0 +1,32 @@
+{
+  "actions": {
+    "frames": 8984,
+    "surprise_normal": 0.6105675291327329,
+    "surprise_anomaly": 0.820907609462738,
+    "copy_normal": 0.6545849805535414,
+    "skill": 0.06724482340487814,
+    "skill_last_third": 0.04056584067336133,
+    "novelty_auc": 0.7558025641025641,
+    "surprise_std_normal": 0.24267903339023938,
+    "steps": 26931,
+    "train_skill": 0.3445936590540479,
+    "probe_final": 0.4803111255168915,
+    "erank_final": 59.610313415527344,
+    "infer_ms_p99": 2.8333805815782407
+  },
+  "zeroed": {
+    "frames": 8984,
+    "surprise_normal": 0.6062367810805639,
+    "surprise_anomaly": 0.8229028942187627,
+    "copy_normal": 0.6528886508865234,
+    "skill": 0.07145455774520404,
+    "skill_last_third": 0.04230681436432593,
+    "novelty_auc": 0.7686647435897436,
+    "surprise_std_normal": 0.2350637789324997,
+    "steps": 26937,
+    "train_skill": 0.3129417203523836,
+    "probe_final": 0.4828173518180847,
+    "erank_final": 57.105201721191406,
+    "infer_ms_p99": 2.702614589361474
+  }
+}

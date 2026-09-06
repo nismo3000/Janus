@@ -170,7 +170,8 @@ def inferencer_main(cfg, ring: FrameRing, bus: WeightBus, stop_event, run_dir: s
     device = torch.device(cfg.device_infer)
     torch.cuda.set_device(device)
 
-    model = WorldModel(cfg.dim, cfg.width, cfg.context_frames, cfg.hidden, cfg.ema_decay).to(device)
+    model = WorldModel(cfg.dim, cfg.width, cfg.context_frames, cfg.hidden, cfg.ema_decay,
+                       cfg.action_dim).to(device)
     version = bus.pull(model, since=-1) or 0
     model.eval()
 
@@ -183,7 +184,10 @@ def inferencer_main(cfg, ring: FrameRing, bus: WeightBus, stop_event, run_dir: s
     fetcher.start()
 
     stream = open_stream(cfg)
-    ctx = deque(maxlen=cfg.context_frames)
+    # Context is kept as *embeddings*: each frame is encoded once, on arrival, and
+    # reused as context for the next tick. Entries are tagged with the weight
+    # version that produced them; a swap invalidates the cache (one re-encode).
+    zctx: deque = deque(maxlen=cfg.context_frames)   # (version, x_on_device, z)
     pending = {}                    # frame idx -> (pred, z_now, weight version at ask time)
     norm = RunningNorm(halflife_s=20.0, fps=cfg.fps)
 
@@ -210,8 +214,10 @@ def inferencer_main(cfg, ring: FrameRing, bus: WeightBus, stop_event, run_dir: s
 
             f_start = time.perf_counter()
             frame_u8 = torch.from_numpy(np.ascontiguousarray(frame_np))
-            idx = ring.write(frame_u8)
-            ctx.append(frame_u8)
+            action = None
+            if cfg.action_dim:
+                action = torch.as_tensor(meta["action"], dtype=torch.float32)
+            idx = ring.write(frame_u8, action)
 
             x_now = to_model_input(frame_u8.unsqueeze(0), device)
 
@@ -228,9 +234,19 @@ def inferencer_main(cfg, ring: FrameRing, bus: WeightBus, stop_event, run_dir: s
                 # only evidence the model learned dynamics rather than smoothness.
                 copy_err = float(prediction_error(z_then, z_tgt).item())
 
-            if len(ctx) == cfg.context_frames:
-                stacked = torch.stack(list(ctx)).unsqueeze(0)
-                pred, z_now = model.predict(to_model_input(stacked, device))
+            z_now = model.encoder(x_now)
+            zctx.append((version, x_now, z_now))
+            if len(zctx) == cfg.context_frames:
+                for i, (v, x_i, _) in enumerate(zctx):    # context must share one coordinate frame
+                    if v != version:                       # -> re-encode once after a swap
+                        zctx[i] = (version, x_i, model.encoder(x_i))
+                z_stack = torch.stack([z for _, _, z in zctx], dim=1)   # (1, C, dim)
+                a_in = None
+                if cfg.action_dim:
+                    a_in = action.unsqueeze(0).to(device)
+                    if not cfg.use_actions:
+                        a_in = torch.zeros_like(a_in)
+                pred = model.predict_from_z(z_stack, a_in)
                 pending[idx + cfg.horizon_frames] = (pred, z_now, version)
 
             # Hot-swap: the fetcher has already landed the new version on-device;

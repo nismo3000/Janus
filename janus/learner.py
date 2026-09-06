@@ -39,13 +39,22 @@ def _build_clips(ring: FrameRing, cfg, ts: List[int]) -> torch.Tensor:
     return flat.view(len(ts), cfg.context_frames + 1, cfg.res, cfg.res, 3)
 
 
+def _action_input(acts: torch.Tensor, cfg, device) -> Optional[torch.Tensor]:
+    """Action tensor for the predictor, or zeros for the no-action ablation."""
+    if not cfg.action_dim:
+        return None
+    a = acts.to(device, non_blocking=True)
+    return a if cfg.use_actions else torch.zeros_like(a)
+
+
 def learner_main(cfg, ring: FrameRing, bus: WeightBus, stop_event, run_dir: str) -> None:
     torch.manual_seed(cfg.seed + 1)
     torch.set_num_threads(cfg.learn_threads)
     g = torch.Generator().manual_seed(cfg.seed + 7)
     device = torch.device(cfg.device_learn)
 
-    model = WorldModel(cfg.dim, cfg.width, cfg.context_frames, cfg.hidden, cfg.ema_decay).to(device)
+    model = WorldModel(cfg.dim, cfg.width, cfg.context_frames, cfg.hidden, cfg.ema_decay,
+                       cfg.action_dim).to(device)
     bus.pull(model, since=-1)                     # start from the same init as the inferencer
     model.train()
 
@@ -53,12 +62,13 @@ def learner_main(cfg, ring: FrameRing, bus: WeightBus, stop_event, run_dir: str)
         list(model.encoder.parameters()) + list(model.predictor.parameters()),
         lr=cfg.lr, weight_decay=cfg.weight_decay,
     )
-    reservoir = Reservoir(cfg.reservoir_size, cfg.context_frames + 1, cfg.res, g)
+    reservoir = Reservoir(cfg.reservoir_size, cfg.context_frames + 1, cfg.res, g, cfg.action_dim)
     g_dev = torch.Generator(device=device).manual_seed(cfg.seed + 13)
     frames_at_start = ring.total()
 
     log = open(f"{run_dir}/learn.jsonl", "w", buffering=1)
     probe: Optional[torch.Tensor] = None          # frozen early clips -> forgetting monitor
+    probe_act: Optional[torch.Tensor] = None
     step = 0
     last_log = time.time()
     steps_at_last_log = 0
@@ -94,23 +104,27 @@ def learner_main(cfg, ring: FrameRing, bus: WeightBus, stop_event, run_dir: str)
             time.sleep(0.1)
             continue
         clips = _build_clips(ring, cfg, ts)
+        acts = ring.gather_actions(ts)                # the command issued at each anchor
 
-        for c in clips[: max(1, n_recent // 8)]:  # trickle the session into long-term memory
-            reservoir.offer(c)
+        for c, a in zip(clips[: max(1, n_recent // 8)], acts):  # trickle into long-term memory
+            reservoir.offer(c, a)
         if probe is None and reservoir.n_filled >= 64:
             probe = reservoir.clips[:64].clone()
+            probe_act = reservoir.acts[:64].clone()
 
         if not cfg.no_replay:
             old = reservoir.sample(cfg.batch - n_recent)
             if old is not None:
-                clips = torch.cat([clips, old], dim=0)
+                clips = torch.cat([clips, old[0]], dim=0)
+                acts = torch.cat([acts, old[1]], dim=0)
 
         x = to_model_input(clips, device)
         if cfg.augment:
-            x = augment_clips(x, g_dev)
+            x, acts = augment_clips(x, g_dev, acts)
         ctx, future = x[:, :cfg.context_frames], x[:, cfg.context_frames]
+        a_in = _action_input(acts, cfg, device)
 
-        pred, z_last = model.predict(ctx)
+        pred, z_last = model.predict(ctx, a_in)
         with torch.no_grad():
             z_tgt = model.encode_target(future)
 
@@ -141,7 +155,7 @@ def learner_main(cfg, ring: FrameRing, bus: WeightBus, stop_event, run_dir: str)
             if probe is not None:
                 with torch.no_grad():
                     px = to_model_input(probe, device)
-                    pp, _ = model.predict(px[:, :cfg.context_frames])
+                    pp, _ = model.predict(px[:, :cfg.context_frames], _action_input(probe_act, cfg, device))
                     pt = model.encode_target(px[:, cfg.context_frames])
                     probe_err = float(prediction_error(pp, pt).mean().item())
             log.write(json.dumps({

@@ -129,6 +129,110 @@ def synthetic_stream(cfg) -> Iterator[Frame]:
         pacer.wait()
 
 
+class CameraWorld(SyntheticWorld):
+    """The synthetic world seen through a virtual camera that the *agent* moves.
+
+    The camera has a scripted command stream: piecewise-constant (pan_x, pan_y,
+    zoom) velocities held for 1-3 s, bounded so the view stays inside the world.
+    The action given to the model at time t is the camera's *realized* motion
+    over the coming prediction horizon (see `action`). Without it, "the view slid
+    left" and "the world moved" are indistinguishable, and surprise has to
+    absorb the agent's own motion as if it were novelty.
+
+    The world is rendered at a fixed higher resolution and the camera crops a
+    window out of it, so pan/zoom are real image-space motions, not a relabel.
+    """
+
+    ACTION_DIM = 3
+
+    def __init__(self, res: int, fps: float, seed: int, regime_seconds: float,
+                 anomaly_every_s: float, anomaly_len_s: float, horizon_frames: int,
+                 world_res: int = 192):
+        super().__init__(world_res, fps, seed, regime_seconds, anomaly_every_s, anomaly_len_s)
+        self.out_res = res
+        self.world_res = world_res
+        self.horizon = horizon_frames
+        self.cam_rng = np.random.RandomState(seed + 4242)
+        # Pre-roll the command schedule so it is a pure function of frame index.
+        self._segments = []          # (start_frame, end_frame, velocity[3])
+        self._cx = self._cy = 0.5
+        self._zoom = 0.5             # fraction of the world the window spans
+        self._pos_cache: Dict[int, tuple] = {0: (0.5, 0.5, 0.5)}
+        self._schedule_until(0)
+
+    def _schedule_until(self, frame: int) -> None:
+        end = self._segments[-1][1] if self._segments else 0
+        while end <= frame + self.horizon + 1:
+            hold = int(self.cam_rng.uniform(1.0, 3.0) * self.fps)
+            v = np.array([self.cam_rng.uniform(-0.5, 0.5),        # pan  (world units / s)
+                          self.cam_rng.uniform(-0.5, 0.5),
+                          self.cam_rng.uniform(-0.3, 0.3)],       # zoom (fraction / s)
+                         dtype=np.float32) / self.fps                 # -> per frame
+            if self.cam_rng.rand() < 0.25:                            # sometimes hold still
+                v[:] = 0.0
+            self._segments.append((end, end + hold, v))
+            end += hold
+
+    def velocity(self, frame: int) -> np.ndarray:
+        self._schedule_until(frame)
+        for s, e, v in self._segments:
+            if s <= frame < e:
+                return v
+        raise RuntimeError("schedule gap")
+
+    def pose(self, frame: int) -> tuple:
+        """Integrate commands with bounds; cached so it's a function of index."""
+        if frame in self._pos_cache:
+            return self._pos_cache[frame]
+        last = max(k for k in self._pos_cache if k <= frame)
+        cx, cy, z = self._pos_cache[last]
+        for f in range(last, frame):
+            v = self.velocity(f)
+            z = float(np.clip(z + v[2], 0.25, 0.75))
+            half = z / 2
+            cx = float(np.clip(cx + v[0], half, 1 - half))
+            cy = float(np.clip(cy + v[1], half, 1 - half))
+            self._pos_cache[f + 1] = (cx, cy, z)
+        return self._pos_cache[frame]
+
+    def action(self, frame: int) -> np.ndarray:
+        """Realized ego-motion over [frame, frame + horizon) -- odometry, not the
+        command. The camera clamps at the world's edge, so the *command* is wrong
+        about what happened on ~70% of frames (measured); feeding that to the
+        predictor is feeding it noise. A robot knows what it actually did from
+        IMU/wheel odometry; that is the signal we condition on. Normalized so a
+        full-speed segment is ~1."""
+        p0 = np.array(self.pose(frame), dtype=np.float32)
+        p1 = np.array(self.pose(frame + self.horizon), dtype=np.float32)
+        d = (p1 - p0) * (self.fps / self.horizon)         # per-second units
+        return (d / np.array([0.5, 0.5, 0.3], dtype=np.float32)).astype(np.float32)
+
+    def render(self, idx: int) -> Frame:
+        full, meta = super().render(idx)
+        cx, cy, z = self.pose(idx)
+        half = int(round(z * self.world_res / 2))
+        x0 = int(round(cx * self.world_res)) - half
+        y0 = int(round(cy * self.world_res)) - half
+        x0 = min(max(x0, 0), self.world_res - 2 * half)
+        y0 = min(max(y0, 0), self.world_res - 2 * half)
+        crop = full[y0:y0 + 2 * half, x0:x0 + 2 * half]
+        import cv2
+        frame = cv2.resize(crop, (self.out_res, self.out_res), interpolation=cv2.INTER_AREA)
+        meta = dict(meta, action=self.action(idx), pose=(cx, cy, z))
+        return np.ascontiguousarray(frame, dtype=np.uint8), meta
+
+
+def camera_stream(cfg) -> Iterator[Frame]:
+    world = CameraWorld(cfg.res, cfg.fps, cfg.seed, cfg.regime_seconds,
+                        cfg.anomaly_every_s, cfg.anomaly_len_s, cfg.horizon_frames)
+    pacer = Pacer(cfg.fps)
+    i = 0
+    while True:
+        yield world.render(i)
+        i += 1
+        pacer.wait()
+
+
 def x11_stream(cfg) -> Iterator[Frame]:
     import cv2
     import mss
@@ -163,6 +267,8 @@ def file_stream(cfg) -> Iterator[Frame]:
 def open_stream(cfg) -> Iterator[Frame]:
     if cfg.source == "synthetic":
         return synthetic_stream(cfg)
+    if cfg.source == "camera":
+        return camera_stream(cfg)
     if cfg.source == "x11":
         return x11_stream(cfg)
     if cfg.source == "file":
