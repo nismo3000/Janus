@@ -2,6 +2,7 @@
 
     python -m janus.run --duration 300 --tag smoke
     python -m janus.run --source x11 --duration 600 --tag desktop
+    python -m janus.run --viewer-port 8811 --tag viewer      # side-by-side page on :8811
 """
 
 import argparse
@@ -12,11 +13,12 @@ from datetime import datetime
 import torch
 import torch.multiprocessing as tmp
 
-from .bus import FrameRing, WeightBus
+from .bus import DisplayBus, FrameRing, WeightBus
 from .config import Config
 from .inferencer import inferencer_main
 from .learner import learner_main
 from .model import WorldModel, state_numel
+from .viewer import viewer_main
 
 
 def build_args() -> argparse.Namespace:
@@ -35,6 +37,14 @@ def build_args() -> argparse.Namespace:
     p.add_argument("--frozen", action="store_true", help="control: serve without ever training")
     p.add_argument("--no-replay", action="store_true", help="ablation: recent frames only")
     p.add_argument("--regime-seconds", type=float, default=45.0)
+    p.add_argument("--viewer-port", type=int, default=0,
+                   help="serve the reality / prediction / dream page on this port (0 = off)")
+    p.add_argument("--viewer-host", default="0.0.0.0")
+    p.add_argument("--display-every", type=int, default=3, help="publish display panels every N frames")
+    p.add_argument("--dream-max-steps", type=int, default=0,
+                   help="auto-resync the dream after N rollout steps (0 = never, free-running)")
+    p.add_argument("--infer-log-every", type=int, default=1,
+                   help="write every Nth scored frame to infer.jsonl (raise for long-lived runs)")
     p.add_argument("--tag", default="run")
     p.add_argument("--runs-dir", default=os.path.expanduser("~/janus/runs"))
     return p.parse_args()
@@ -56,6 +66,8 @@ def config_from_args(a: argparse.Namespace) -> Config:
         action_dim=action_dim, use_actions=not a.no_actions,
         frozen=a.frozen, no_replay=a.no_replay, duration_s=a.duration,
         regime_seconds=a.regime_seconds, seed=a.seed,
+        viewer_port=a.viewer_port, viewer_host=a.viewer_host, display_every=a.display_every,
+        dream_max_steps=a.dream_max_steps, infer_log_every=a.infer_log_every,
     )
 
 
@@ -67,18 +79,23 @@ def launch(cfg: Config, run_dir: str) -> str:
     # Built on CPU purely to size the bus and seed both processes identically.
     torch.manual_seed(cfg.seed)
     seed_model = WorldModel(cfg.dim, cfg.width, cfg.context_frames, cfg.hidden, cfg.ema_decay,
-                            cfg.action_dim)
+                            cfg.action_dim, cfg.res)
     bus = WeightBus(state_numel(seed_model))
     bus.publish(seed_model)
 
     ring = FrameRing(cfg.ring_frames, cfg.res, cfg.action_dim)
+    display = DisplayBus(cfg.res) if cfg.viewer_port > 0 else None
     stop = tmp.Event()
     t_start = time.time()
 
     procs = [
-        tmp.Process(target=inferencer_main, args=(cfg, ring, bus, stop, run_dir), name="inferencer"),
+        tmp.Process(target=inferencer_main, args=(cfg, ring, bus, stop, run_dir, display),
+                    name="inferencer"),
         tmp.Process(target=learner_main, args=(cfg, ring, bus, stop, run_dir), name="learner"),
     ]
+    if display is not None:
+        procs.append(tmp.Process(target=viewer_main, args=(cfg, display, stop, run_dir),
+                                 name="viewer"))
     for p in procs:
         p.start()
 
@@ -105,7 +122,9 @@ def main() -> None:
     run_dir = os.path.join(a.runs_dir, f"{stamp}-{a.tag}")
     print(f"[run] {run_dir}\n[run] infer={cfg.device_infer} learn={cfg.device_learn} "
           f"source={cfg.source} actions={cfg.action_dim if cfg.use_actions else 'zeroed'} "
-          f"frozen={cfg.frozen} no_replay={cfg.no_replay}", flush=True)
+          f"frozen={cfg.frozen} no_replay={cfg.no_replay}"
+          + (f" viewer=http://{cfg.viewer_host}:{cfg.viewer_port}" if cfg.viewer_port else ""),
+          flush=True)
     launch(cfg, run_dir)
     print(f"[run] artifacts in {run_dir}", flush=True)
 

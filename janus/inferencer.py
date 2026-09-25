@@ -22,10 +22,79 @@ from typing import Optional
 import numpy as np
 import torch
 
-from .bus import FlatLayout, FrameRing, WeightBus
+from .bus import DisplayBus, FlatLayout, FrameRing, WeightBus
 from .frames import to_model_input
-from .model import Encoder, WorldModel, prediction_error
+from .model import Encoder, WorldModel, match_scale, prediction_error
 from .sources import open_stream
+
+
+def _to_u8(img: torch.Tensor) -> torch.Tensor:
+    """(1,3,R,R) in [-1,1] on device -> (R,R,3) uint8 on host, for a display panel."""
+    return ((img[0].movedim(0, -1) + 1.0) * 127.5).round().clamp_(0, 255).to(torch.uint8).cpu()
+
+
+class Dream:
+    """A free-running open-loop rollout that lives beside the real stream.
+
+    Seeded once from two real embeddings, it then only ever feeds on its own
+    output: each head is predicted from the previous heads, `horizon` frames at a
+    time. It is never trained on -- the learner sees real frames only. When the
+    real frame the head was a belief about arrives, the head is scored against it
+    (in the current target space) and the dream rolls one step further. The
+    copy baseline is "the world still looks like the moment the dream started".
+    """
+
+    def __init__(self, horizon: int):
+        self.horizon = horizon
+        self.z_prev: Optional[torch.Tensor] = None      # embedding one step behind the head
+        self.z_head: Optional[torch.Tensor] = None      # belief about frame `head_idx`
+        self.head_idx: int = -1
+        self.steps: int = 0                             # rollout steps since the seed
+        self.anchor_idx: int = -1
+        self.anchor_tgt: Optional[torch.Tensor] = None  # target embedding at the seed moment
+        self.err = float("nan")
+        self.copy_err = float("nan")
+        self.seeds = 0
+
+    def seed(self, model: WorldModel, z_ctx: torch.Tensor, x_now: torch.Tensor, idx: int,
+             action: Optional[torch.Tensor]) -> None:
+        """z_ctx: (1, C, dim) real context ending at frame idx."""
+        self.z_prev = z_ctx[:, -1].clone()              # real z(t), at the encoder's scale
+        # Heads are kept at the real embedding's scale: the loss is cosine, so the
+        # predictor's raw output norm is arbitrary (~7x too large) and would otherwise
+        # be fed back into a predictor that never saw such inputs.
+        self.z_head = match_scale(model.predict_from_z(z_ctx, action), self.z_prev)
+        self.head_idx = idx + self.horizon
+        self.steps = 1
+        self.anchor_idx = idx
+        self.anchor_tgt = model.target(x_now)
+        self.err = self.copy_err = float("nan")
+        self.seeds += 1
+
+    def maybe_score_and_roll(self, model: WorldModel, x_now: torch.Tensor, idx: int,
+                             action: Optional[torch.Tensor]) -> bool:
+        """When reality reaches the head's frame: score it, then roll one more step."""
+        if self.z_head is None or idx != self.head_idx:
+            return False
+        z_real = model.target(x_now)
+        self.err = float(prediction_error(self.z_head, z_real).item())
+        self.copy_err = float(prediction_error(self.anchor_tgt, z_real).item())
+        # Roll: the head becomes the past. z_prev and z_head are always `horizon`
+        # apart (real z(t) and the belief for t+h after the seed, two heads after
+        # that), and dream_step rebuilds the one-frame-back context from latent
+        # velocity so the predictor sees the motion cue it was trained on.
+        z_next = match_scale(model.dream_step(self.z_prev, self.z_head, self.horizon, action),
+                             self.z_prev)
+        self.z_prev, self.z_head = self.z_head, z_next
+        self.head_idx = idx + self.horizon
+        self.steps += 1
+        return True
+
+    @property
+    def skill(self) -> float:
+        if not math.isfinite(self.err) or not math.isfinite(self.copy_err) or self.copy_err <= 1e-8:
+            return float("nan")
+        return 1.0 - self.err / self.copy_err
 
 
 class WeightFetcher:
@@ -164,14 +233,15 @@ class RunningNorm:
         return d / max(math.sqrt(self.var), 1e-6)
 
 
-def inferencer_main(cfg, ring: FrameRing, bus: WeightBus, stop_event, run_dir: str) -> None:
+def inferencer_main(cfg, ring: FrameRing, bus: WeightBus, stop_event, run_dir: str,
+                    display: Optional[DisplayBus] = None) -> None:
     torch.manual_seed(cfg.seed)
     torch.set_num_threads(cfg.infer_threads)
     device = torch.device(cfg.device_infer)
     torch.cuda.set_device(device)
 
     model = WorldModel(cfg.dim, cfg.width, cfg.context_frames, cfg.hidden, cfg.ema_decay,
-                       cfg.action_dim).to(device)
+                       cfg.action_dim, cfg.res).to(device)
     version = bus.pull(model, since=-1) or 0
     model.eval()
 
@@ -204,6 +274,13 @@ def inferencer_main(cfg, ring: FrameRing, bus: WeightBus, stop_event, run_dir: s
     last_beat = t0
     frames = 0
     swaps = 0
+    scored = 0
+
+    dream = Dream(cfg.horizon_frames)
+    skill_ewma: Optional[float] = None            # served skill vs copy, smoothed for display
+    pred_panel: Optional[torch.Tensor] = None
+    dream_panel: Optional[torch.Tensor] = None
+    last_ms = 0.0
 
     with torch.no_grad():
         for frame_np, meta in stream:
@@ -236,6 +313,7 @@ def inferencer_main(cfg, ring: FrameRing, bus: WeightBus, stop_event, run_dir: s
 
             z_now = model.encoder(x_now)
             zctx.append((version, x_now, z_now))
+            dream_scored = False
             if len(zctx) == cfg.context_frames:
                 for i, (v, x_i, _) in enumerate(zctx):    # context must share one coordinate frame
                     if v != version:                       # -> re-encode once after a swap
@@ -249,6 +327,18 @@ def inferencer_main(cfg, ring: FrameRing, bus: WeightBus, stop_event, run_dir: s
                 pred = model.predict_from_z(z_stack, a_in)
                 pending[idx + cfg.horizon_frames] = (pred, z_now, version)
 
+                # The dream: seeded from reality once, then fed only its own output.
+                resync = bool(display is not None and display.take_commands() & DisplayBus.CMD_RESYNC)
+                if (dream.z_head is None or resync
+                        or (cfg.dream_max_steps and dream.steps > cfg.dream_max_steps)):
+                    dream.seed(model, z_stack, x_now, idx, a_in)
+                    if display is not None:
+                        dream_panel = _to_u8(model.decode(dream.z_head))
+                elif dream.maybe_score_and_roll(model, x_now, idx, a_in):
+                    dream_scored = True
+                    if display is not None:
+                        dream_panel = _to_u8(model.decode(dream.z_head))
+
             # Hot-swap: the fetcher has already landed the new version on-device;
             # this is a pointer rebind plus one D2D copy of the target span.
             swapped = fetcher.swap_if_ready(model)
@@ -258,21 +348,53 @@ def inferencer_main(cfg, ring: FrameRing, bus: WeightBus, stop_event, run_dir: s
 
             now = time.time()
             frames += 1
+            z = 0.0
             if surprise is not None:
                 z = norm.update(surprise)
-                log.write(json.dumps({
-                    "t": now - t0,
-                    "frame": idx,
-                    "surprise": surprise,
-                    "copy_err": copy_err,
-                    "z": z,
-                    "regime": meta.get("regime", -1),
-                    "anomaly": meta.get("anomaly", 0),
-                    "version": version,
-                    "asked_version": asked_v,
-                    "swap": int(swapped is not None),
-                    "ms": (time.perf_counter() - f_start) * 1e3,
-                }) + "\n")
+                scored += 1
+                if copy_err and copy_err > 1e-8:
+                    sk = 1.0 - surprise / copy_err
+                    skill_ewma = sk if skill_ewma is None else 0.98 * skill_ewma + 0.02 * sk
+                last_ms = (time.perf_counter() - f_start) * 1e3
+                if scored % max(1, cfg.infer_log_every) == 0:
+                    rec = {
+                        "t": now - t0,
+                        "frame": idx,
+                        "surprise": surprise,
+                        "copy_err": copy_err,
+                        "z": z,
+                        "regime": meta.get("regime", -1),
+                        "anomaly": meta.get("anomaly", 0),
+                        "version": version,
+                        "asked_version": asked_v,
+                        "swap": int(swapped is not None),
+                        "ms": last_ms,
+                    }
+                    if dream_scored:
+                        rec.update({"dream_step": dream.steps - 1, "dream_err": dream.err,
+                                    "dream_copy": dream.copy_err})
+                    log.write(json.dumps(rec) + "\n")
+
+            # Display: reality, what was predicted for now, and the dream head.
+            if display is not None and frames % max(1, cfg.display_every) == 0:
+                if surprise is not None:
+                    pred_panel = _to_u8(model.decode(pred_then))
+                panels = {"real": frame_u8}
+                if pred_panel is not None:
+                    panels["pred"] = pred_panel
+                if dream_panel is not None:
+                    panels["dream"] = dream_panel
+                display.publish(panels, [
+                    now - t0, idx, frames / max(1e-6, now - t0), version,
+                    surprise if surprise is not None else float("nan"), z,
+                    copy_err if copy_err is not None else float("nan"),
+                    skill_ewma if skill_ewma is not None else float("nan"),
+                    dream.steps, dream.err, dream.copy_err, dream.skill,
+                    (dream.head_idx - idx) / cfg.fps if dream.z_head is not None else float("nan"),
+                    dream.steps * cfg.horizon_frames / cfg.fps,
+                    meta.get("regime", -1), meta.get("anomaly", 0),
+                    last_ms, swaps, dream.seeds,
+                ])
 
             if now - last_beat >= 5.0:
                 print(f"[infer] {now - t0:6.1f}s  frames={frames}  fps={frames / (now - t0):5.1f}  "

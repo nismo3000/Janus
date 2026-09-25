@@ -9,6 +9,7 @@ No BatchNorm anywhere: the frame stream is violently non-iid, so batch statistic
 would drift with the scene and leak the future into the target.
 """
 
+import math
 from typing import Optional, Tuple
 
 import torch
@@ -67,11 +68,44 @@ class Predictor(nn.Module):
         return self.net(h)
 
 
+class Decoder(nn.Module):
+    """dim -> (B,3,R,R) in [-1,1]. A *probe*, not part of the world model.
+
+    It is trained only on detached target embeddings, so no gradient from pixels
+    ever reaches the encoder or predictor: the model still never predicts pixels.
+    Its one job is to show a human what an embedding holds -- the prediction the
+    model made half a second ago, or the head of a free-running dream. Expect it
+    to be blurry: whatever the embedding discarded, the decoder cannot invent.
+    """
+
+    def __init__(self, dim: int = 256, width: int = 32, res: int = 96):
+        super().__init__()
+        if res % 16:
+            raise ValueError(f"res {res} must be a multiple of 16 (four doublings)")
+        w = width
+        self.base = res // 16
+        self.c0 = 4 * w
+        self.fc = nn.Linear(dim, self.c0 * self.base * self.base)
+        chans = [(self.c0, 4 * w), (4 * w, 2 * w), (2 * w, w), (w, w)]      # 6->12->24->48->96
+        blocks = []
+        for cin, cout in chans:
+            blocks += [nn.ConvTranspose2d(cin, cout, 4, stride=2, padding=1), _norm(cout), nn.SiLU()]
+        self.tower = nn.Sequential(*blocks)
+        self.out = nn.Conv2d(w, 3, 3, padding=1)
+
+    def forward(self, z: torch.Tensor) -> torch.Tensor:
+        # Direction only. The world model's loss is cosine, so a prediction's norm is
+        # unconstrained (measured ~7x the encoder's); the decoder must not care.
+        z = F.normalize(z, dim=-1) * math.sqrt(z.shape[-1])
+        h = F.silu(self.fc(z)).view(-1, self.c0, self.base, self.base)
+        return torch.tanh(self.out(self.tower(h)))
+
+
 class WorldModel(nn.Module):
     """Online encoder + predictor, plus the EMA target encoder that supervises it."""
 
     def __init__(self, dim: int = 256, width: int = 32, context: int = 2, hidden: int = 1024,
-                 ema_decay: float = 0.996, action_dim: int = 0):
+                 ema_decay: float = 0.996, action_dim: int = 0, res: int = 96):
         super().__init__()
         self.dim = dim
         self.context = context
@@ -83,6 +117,8 @@ class WorldModel(nn.Module):
         self.target.load_state_dict(self.encoder.state_dict())
         for p in self.target.parameters():
             p.requires_grad_(False)
+        # Built last so the encoder/predictor/target draw the same init as before it existed.
+        self.decoder = Decoder(dim, width, res)
 
     @torch.no_grad()
     def update_target(self) -> None:
@@ -112,6 +148,35 @@ class WorldModel(nn.Module):
     @torch.no_grad()
     def encode_target(self, future_frame: torch.Tensor) -> torch.Tensor:
         return self.target(future_frame)
+
+    def decode(self, z: torch.Tensor) -> torch.Tensor:
+        """Embedding -> pixels in [-1, 1], through the probe decoder."""
+        return self.decoder(z)
+
+    def dream_step(self, z_prev: torch.Tensor, z_head: torch.Tensor, steps_apart: int,
+                   action: Optional[torch.Tensor] = None) -> torch.Tensor:
+        """One open-loop rollout step from the model's own embeddings.
+
+        The predictor was trained on context frames one step apart, but a rollout
+        only has embeddings `horizon` apart. Feeding those directly would show it a
+        motion cue 15x too large. So the missing one-step-back context is rebuilt by
+        latent velocity: v = (z_head - z_prev) / steps_apart, ctx = (z_head - v, z_head).
+        Nothing here is trained on its own output -- this is inference only.
+        """
+        # The predictor was trained on encoder embeddings (norm ~sqrt(dim)); its own
+        # outputs are ~7x larger, so a rollout must rescale before feeding back.
+        z_head = match_scale(z_head, z_prev)
+        v = (z_head - z_prev) / float(max(1, steps_apart))
+        ctx = torch.stack([z_head - v, z_head], dim=1)          # (B, 2, dim)
+        if self.context != 2:
+            ctx = torch.stack([z_head - v * (self.context - 1 - i) for i in range(self.context)],
+                              dim=1)
+        return self.predictor(ctx, action)
+
+
+def match_scale(z: torch.Tensor, ref: torch.Tensor) -> torch.Tensor:
+    """Keep z's direction, give it ref's norm (per row)."""
+    return F.normalize(z, dim=-1) * ref.norm(dim=-1, keepdim=True)
 
 
 def prediction_error(pred: torch.Tensor, target: torch.Tensor) -> torch.Tensor:

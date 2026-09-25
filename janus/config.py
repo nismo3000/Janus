@@ -51,6 +51,20 @@ class Config:
     # --- weight bus ---
     publish_every: int = 50         # learner publishes weights every N optimizer steps
 
+    # --- decoder probe (pixels for humans; gradients never reach the encoder) ---
+    lambda_rec: float = 1.0         # L1 reconstruction weight for the probe decoder
+    rec_batch: int = 16             # clips per step the decoder trains on (full-res output is the
+                                    # learner's priciest op; 64 halved its step rate, 16 does not)
+
+    # --- dream: free-running open-loop rollout served next to reality ---
+    dream_max_steps: int = 0        # auto-resync the dream after N rollout steps; 0 = never
+
+    # --- viewer (side-by-side page served from the head node) ---
+    viewer_port: int = 0            # >0: launch the viewer process on this port
+    viewer_host: str = "0.0.0.0"
+    display_every: int = 3          # decode + publish display panels every N frames
+    infer_log_every: int = 1        # write every Nth scored frame to infer.jsonl (1 = all)
+
     # --- ablation / control switches (used by scripts/validate.py) ---
     frozen: bool = False            # control: never train, only serve
     no_replay: bool = False         # ablation: recent ring only, no reservoir

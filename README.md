@@ -45,10 +45,50 @@ Surprise falls as it learns a scene and spikes when the scene does something new
 ./venv/bin/python -m janus.run --source x11 --duration 600    # learn your desktop
 ./venv/bin/python -m janus.run --source file --source-path clip.mp4
 ./venv/bin/python scripts/validate.py --duration 300           # the honesty harness
+./venv/bin/python -m janus.run --viewer-port 8811 --tag viewer  # side-by-side page on :8811
 ```
 
 Artifacts land in `runs/<stamp>-<tag>/`: `infer.jsonl` (per-frame surprise),
 `learn.jsonl` (per-second training telemetry), `config.json`, `model.pt`.
+
+## The viewer: reality, prediction, dream
+
+`--viewer-port 8811` adds a third process that serves a page (`http://100.67.213.7:8811/`
+on the tailnet; `janus-viewer.service` keeps one running on the synthetic world). Three
+panels, one row:
+
+| panel | what it is |
+|---|---|
+| **Reality** | the frame the inferencer just saw |
+| **Predicted** | the latent prediction the model made half a second ago *for this moment*, decoded to pixels |
+| **Dream** | a free-running rollout: seeded from reality once, then fed only its own output, one horizon (0.5 s) per step, never trained on. Its head is the belief about the next horizon boundary; when reality arrives there the head is scored (error, and error of "the world still looks like the seed moment") and the dream rolls on. A button resyncs it; `--dream-max-steps N` resyncs automatically. |
+
+Below them: surprise z, served skill vs copy, dream error vs its copy baseline, weight
+version, learner steps/s, embedding rank, decoder loss, frame time, regime; and a 90 s trace.
+
+Three things to know before reading the panels:
+
+1. **The model still never predicts pixels.** Both decoded panels come from a *probe
+   decoder* (`Decoder` in `model.py`) trained only on detached target embeddings, with its
+   own optimizer and its own gradient clip, so it cannot move the encoder or predictor by
+   any path. It exists so a human can see what an embedding holds.
+2. **They will be blurry, and that is the truth, not a bug.** The encoder ends in a global
+   average pool, so the 256-d embedding carries *what* is in the frame (regime, colours,
+   coarse layout) and almost no *where*. A grating decodes to the right two colours with no
+   stripes. Sharper panels need a spatial readout — the per-level readout in
+   `~/online_engine/V1_SPEC.md` is exactly that change.
+3. **Scale.** The world model's loss is cosine, so a prediction's norm is unconstrained
+   (measured ~7x the encoder's). The decoder normalizes its input, and the dream rescales
+   every head to the real embedding's norm before feeding it back; without both, the panels
+   are black and the rollout is off-distribution.
+
+The dream also needs a one-frame-back context the rollout does not have (heads are 15
+frames apart, context frames are 1 apart); `WorldModel.dream_step` rebuilds it from latent
+velocity. This is inference only. Training a predictor on its own rolled-out context (with
+real targets) is the known fix for compounding error and is deliberately not done yet.
+
+Costs: the decoder trains on a 16-clip slice per step (the full batch halved the learner's
+step rate); the display path adds ~0.6 ms to frame p99. Frame loop stays under the budget.
 
 ## Three things that will bite you
 
@@ -192,8 +232,9 @@ honesty harness. Those came from instrumenting this system.
 | `janus/run.py` | launcher; spawns both processes, sizes the weight bus |
 | `janus/inferencer.py` | serves surprise at frame rate; fetcher thread + device double-buffer for swaps |
 | `janus/learner.py` | continuous training loop, replay, publishing |
-| `janus/model.py` | encoder / predictor / EMA target, VICReg, effective rank |
-| `janus/bus.py` | shared frame ring, seqlock weight bus, reservoir |
+| `janus/model.py` | encoder / predictor / EMA target, VICReg, effective rank; probe decoder + `dream_step` |
+| `janus/bus.py` | shared frame ring, seqlock weight bus, reservoir, display bus |
+| `janus/viewer.py` | the side-by-side page: reality / prediction / dream, stdlib HTTP + MJPEG |
 | `janus/sources.py` | synthetic world, X11 screen capture, video file |
 | `janus/frames.py` | normalization + clip-consistent augmentation |
 | `scripts/validate.py` | the control/ablation harness |

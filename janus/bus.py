@@ -7,6 +7,9 @@ Two objects cross the process boundary:
   WeightBus  -- the learner publishes fresh weights; the inferencer hot-swaps
                 them mid-stream. Double-buffered seqlock so the reader can never
                 observe a half-written parameter vector.
+  DisplayBus -- the inferencer publishes a few uint8 panels (reality, the decoded
+                prediction, the decoded dream head) plus a stats vector; the viewer
+                process reads them for the side-by-side page. Optional.
 
 Everything lives in pinned CPU shared memory. The weight vector is a few tens of
 MB and gets published every couple of seconds, so the copy cost is noise -- and
@@ -203,3 +206,55 @@ class Reservoir:
         k = min(k, self.n_filled)
         idx = torch.randint(0, self.n_filled, (k,), generator=self.g)
         return self.clips[idx], self.acts[idx]
+
+
+class DisplayBus:
+    """Inferencer -> viewer: display panels + stats, and one command word back.
+
+    Writer copies under the lock and bumps `seq`; the reader copies under the same
+    lock, so a panel is never observed half-written. Everything is tiny (three
+    96x96 frames), so holding the lock for the memcpy costs microseconds.
+    """
+
+    N_STATS = 24
+    PANELS = ("real", "pred", "dream")
+    CMD_RESYNC = 1
+
+    def __init__(self, res: int):
+        self.res = res
+        self.frames = torch.zeros((len(self.PANELS), res, res, 3), dtype=torch.uint8).share_memory_()
+        self.stats = torch.zeros(self.N_STATS, dtype=torch.float32).share_memory_()
+        self.seq = mp.Value("q", 0)
+        self.cmd = mp.Value("i", 0)
+
+    def publish(self, panels, stats) -> int:
+        """panels: dict name -> (res,res,3) uint8 CPU tensor (missing panels keep their
+        last image); stats: sequence of floats, at most N_STATS."""
+        with self.seq.get_lock():
+            for i, name in enumerate(self.PANELS):
+                t = panels.get(name)
+                if t is not None:
+                    self.frames[i].copy_(t)
+            n = min(len(stats), self.N_STATS)
+            self.stats[:n] = torch.as_tensor(list(stats[:n]), dtype=torch.float32)
+            self.seq.value += 1
+            return self.seq.value
+
+    def read(self) -> tuple:
+        """-> (seq, frames (P,res,res,3) uint8 copy, stats list)."""
+        with self.seq.get_lock():
+            return self.seq.value, self.frames.clone(), self.stats.tolist()
+
+    def current_seq(self) -> int:
+        with self.seq.get_lock():
+            return self.seq.value
+
+    def request(self, flag: int) -> None:
+        with self.cmd.get_lock():
+            self.cmd.value |= flag
+
+    def take_commands(self) -> int:
+        with self.cmd.get_lock():
+            c = self.cmd.value
+            self.cmd.value = 0
+            return c

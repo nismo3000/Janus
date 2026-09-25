@@ -11,6 +11,7 @@ import time
 from typing import List, Optional
 
 import torch
+import torch.nn.functional as F
 
 from .bus import FrameRing, Reservoir, WeightBus
 from .frames import augment_clips, to_model_input
@@ -54,14 +55,15 @@ def learner_main(cfg, ring: FrameRing, bus: WeightBus, stop_event, run_dir: str)
     device = torch.device(cfg.device_learn)
 
     model = WorldModel(cfg.dim, cfg.width, cfg.context_frames, cfg.hidden, cfg.ema_decay,
-                       cfg.action_dim).to(device)
+                       cfg.action_dim, cfg.res).to(device)
     bus.pull(model, since=-1)                     # start from the same init as the inferencer
     model.train()
 
-    opt = torch.optim.AdamW(
-        list(model.encoder.parameters()) + list(model.predictor.parameters()),
-        lr=cfg.lr, weight_decay=cfg.weight_decay,
-    )
+    world_params = list(model.encoder.parameters()) + list(model.predictor.parameters())
+    opt = torch.optim.AdamW(world_params, lr=cfg.lr, weight_decay=cfg.weight_decay)
+    # The probe decoder gets its own optimizer and its own clip so it cannot change the
+    # world model's step in any way -- not even through a shared gradient norm.
+    opt_dec = torch.optim.AdamW(model.decoder.parameters(), lr=cfg.lr, weight_decay=cfg.weight_decay)
     reservoir = Reservoir(cfg.reservoir_size, cfg.context_frames + 1, cfg.res, g, cfg.action_dim)
     g_dev = torch.Generator(device=device).manual_seed(cfg.seed + 13)
     frames_at_start = ring.total()
@@ -120,7 +122,12 @@ def learner_main(cfg, ring: FrameRing, bus: WeightBus, stop_event, run_dir: str)
 
         x = to_model_input(clips, device)
         if cfg.augment:
-            x, acts = augment_clips(x, g_dev, acts)
+            # Only sources with real actions get them flipped/scaled with the pixels; the
+            # ring pads action-free sources to one zero column, which augment must not index.
+            if cfg.action_dim:
+                x, acts = augment_clips(x, g_dev, acts)
+            else:
+                x = augment_clips(x, g_dev, None)
         ctx, future = x[:, :cfg.context_frames], x[:, cfg.context_frames]
         a_in = _action_input(acts, cfg, device)
 
@@ -138,11 +145,18 @@ def learner_main(cfg, ring: FrameRing, bus: WeightBus, stop_event, run_dir: str)
         cov = 0.5 * (cov_z + cov_p)
         loss = err + cfg.lambda_var * var + cfg.lambda_cov * cov
 
+        # Probe decoder: pixels from the *detached* target embedding of the future frame.
+        # z_tgt carries no graph, so this loss can only ever move the decoder.
+        nrec = max(1, min(cfg.rec_batch, z_tgt.shape[0]))
+        rec = F.l1_loss(model.decode(z_tgt[:nrec]), future[:nrec])
+
         opt.zero_grad(set_to_none=True)
-        loss.backward()
-        gnorm = torch.nn.utils.clip_grad_norm_(
-            list(model.encoder.parameters()) + list(model.predictor.parameters()), cfg.grad_clip)
+        opt_dec.zero_grad(set_to_none=True)
+        (loss + cfg.lambda_rec * rec).backward()
+        gnorm = torch.nn.utils.clip_grad_norm_(world_params, cfg.grad_clip)
+        torch.nn.utils.clip_grad_norm_(model.decoder.parameters(), cfg.grad_clip)
         opt.step()
+        opt_dec.step()
         model.update_target()
         step += 1
 
@@ -168,6 +182,7 @@ def learner_main(cfg, ring: FrameRing, bus: WeightBus, stop_event, run_dir: str)
                 "var": float(var.item()),
                 "cov": float(cov.item()),
                 "loss": float(loss.item()),
+                "rec": float(rec.item()),
                 "grad_norm": float(gnorm.item()),
                 "erank": effective_rank(z_last.detach()),
                 "probe_err": probe_err,
