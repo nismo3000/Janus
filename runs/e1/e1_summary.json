@@ -1,0 +1,766 @@
+{
+  "live": {
+    "frames_scored": 30636,
+    "duration_s": 1226.0604040622711,
+    "fps": 24.98734964321057,
+    "skill": 0.048447213899957986,
+    "skill_last_third": -0.013052617873409833,
+    "surprise_normal": 0.049875782991974954,
+    "surprise_anomaly": 0.053316039230484745,
+    "copy_normal": 0.05241515102529608,
+    "novelty_auc_raw": 0.49245979926512573,
+    "novelty_auc_z": 0.712092773311457,
+    "novelty_auc_raw_incl_cuts": 0.4816036020814812,
+    "novelty_auc_macro_raw": 0.7022585057573801,
+    "novelty_auc_macro_z": 0.6873383373774623,
+    "n_videos_with_events": 19,
+    "per_video_auc": [
+      {
+        "video": 16,
+        "name": "test01",
+        "auc_raw": 0.7790163058637758,
+        "auc_z": 0.7784005219389275
+      },
+      {
+        "video": 17,
+        "name": "test02",
+        "auc_raw": 0.6999500204141971,
+        "auc_z": 0.7134761857832717
+      },
+      {
+        "video": 18,
+        "name": "test03",
+        "auc_raw": 0.4942528735632184,
+        "auc_z": 0.47611944663800415
+      },
+      {
+        "video": 19,
+        "name": "test04",
+        "auc_raw": 0.8116808430963462,
+        "auc_z": 0.8232627186647408
+      },
+      {
+        "video": 20,
+        "name": "test05",
+        "auc_raw": 0.9333717187822954,
+        "auc_z": 0.9103798190962687
+      },
+      {
+        "video": 21,
+        "name": "test06",
+        "auc_raw": 0.8309136836027714,
+        "auc_z": 0.8420381062355659
+      },
+      {
+        "video": 22,
+        "name": "test07",
+        "auc_raw": 0.8972275132275133,
+        "auc_z": 0.9174391534391534
+      },
+      {
+        "video": 24,
+        "name": "test09",
+        "auc_raw": 0.7091220007886675,
+        "auc_z": 0.7027027027027027
+      },
+      {
+        "video": 25,
+        "name": "test10",
+        "auc_raw": 0.6194222616582865,
+        "auc_z": 0.5829241841664202
+      },
+      {
+        "video": 26,
+        "name": "test11",
+        "auc_raw": 0.6426853269188716,
+        "auc_z": 0.5984158223388488
+      },
+      {
+        "video": 27,
+        "name": "test12",
+        "auc_raw": 0.7828061216057646,
+        "auc_z": 0.7807402449303387
+      },
+      {
+        "video": 28,
+        "name": "test13",
+        "auc_raw": 0.8825979089136984,
+        "auc_z": 0.8831886112587867
+      },
+      {
+        "video": 29,
+        "name": "test14",
+        "auc_raw": 0.898829908675799,
+        "auc_z": 0.9001141552511416
+      },
+      {
+        "video": 30,
+        "name": "test15",
+        "auc_raw": 0.8972125435540069,
+        "auc_z": 0.8525874306362111
+      },
+      {
+        "video": 31,
+        "name": "test16",
+        "auc_raw": 0.40385239877625667,
+        "auc_z": 0.28605855509408806
+      },
+      {
+        "video": 32,
+        "name": "test17",
+        "auc_raw": 0.8412728658536586,
+        "auc_z": 0.8152311991869918
+      },
+      {
+        "video": 33,
+        "name": "test18",
+        "auc_raw": 0.19858156028368795,
+        "auc_z": 0.17872340425531916
+      },
+      {
+        "video": 34,
+        "name": "test19",
+        "auc_raw": 0.2537878787878788,
+        "auc_z": 0.259297520661157
+      },
+      {
+        "video": 35,
+        "name": "test20",
+        "auc_raw": 0.7663278750235272,
+        "auc_z": 0.7583286278938453
+      }
+    ],
+    "cut_frames_excluded": 1786,
+    "class_auc": {
+      "Avenue": {
+        "auc_raw": 0.7022585057573801,
+        "auc_z": 0.6873383373774623,
+        "n_videos": 19,
+        "n_anom": 3714,
+        "n_norm": 10548
+      }
+    },
+    "per_video": [
+      {
+        "video": 0,
+        "class": "AvenueNormal",
+        "skill": 0.40812694254330284,
+        "surprise": 0.08833110507225757,
+        "frames": 614
+      },
+      {
+        "video": 1,
+        "class": "AvenueNormal",
+        "skill": 0.14188901750841532,
+        "surprise": 0.11613855534918417,
+        "frames": 1461
+      },
+      {
+        "video": 2,
+        "class": "AvenueNormal",
+        "skill": -0.04154144142496086,
+        "surprise": 0.07859518985077998,
+        "frames": 1437
+      },
+      {
+        "video": 3,
+        "class": "AvenueNormal",
+        "skill": -0.0230055832243119,
+        "surprise": 0.06781789217804655,
+        "frames": 1461
+      },
+      {
+        "video": 4,
+        "class": "AvenueNormal",
+        "skill": -0.07765359907283509,
+        "surprise": 0.06284740485397039,
+        "frames": 765
+      },
+      {
+        "video": 5,
+        "class": "AvenueNormal",
+        "skill": 0.016686923127661513,
+        "surprise": 0.05753068345446525,
+        "frames": 1461
+      },
+      {
+        "video": 6,
+        "class": "AvenueNormal",
+        "skill": 0.046188181336679124,
+        "surprise": 0.0608939147200098,
+        "frames": 1049
+      },
+      {
+        "video": 7,
+        "class": "AvenueNormal",
+        "skill": 0.03480016432316224,
+        "surprise": 0.07913956036858623,
+        "frames": 967
+      },
+      {
+        "video": 8,
+        "class": "AvenueNormal",
+        "skill": 0.016703121017322187,
+        "surprise": 0.05654865316629943,
+        "frames": 1341
+      },
+      {
+        "video": 9,
+        "class": "AvenueNormal",
+        "skill": 0.020472845682536045,
+        "surprise": 0.03418691536349713,
+        "frames": 1173
+      },
+      {
+        "video": 10,
+        "class": "AvenueNormal",
+        "skill": 0.0651491604275507,
+        "surprise": 0.0342313197177673,
+        "frames": 731
+      },
+      {
+        "video": 11,
+        "class": "AvenueNormal",
+        "skill": 0.06195551564168289,
+        "surprise": 0.0903728158850419,
+        "frames": 95
+      },
+      {
+        "video": 12,
+        "class": "AvenueNormal",
+        "skill": 0.11561245139932297,
+        "surprise": 0.09300449000129217,
+        "frames": 316
+      },
+      {
+        "video": 13,
+        "class": "AvenueNormal",
+        "skill": -0.21703602982075476,
+        "surprise": 0.028432166705960812,
+        "frames": 460
+      },
+      {
+        "video": 14,
+        "class": "AvenueNormal",
+        "skill": 0.05789218290778697,
+        "surprise": 0.04749086391020923,
+        "frames": 303
+      },
+      {
+        "video": 15,
+        "class": "AvenueNormal",
+        "skill": 0.039361502201368026,
+        "surprise": 0.06277012794288163,
+        "frames": 194
+      },
+      {
+        "video": 16,
+        "class": "Avenue",
+        "skill": -0.03561233124214569,
+        "surprise": 0.026026077870366923,
+        "frames": 938
+      },
+      {
+        "video": 17,
+        "class": "Avenue",
+        "skill": -0.005191971487592095,
+        "surprise": 0.025156882352791652,
+        "frames": 1022
+      },
+      {
+        "video": 18,
+        "class": "Avenue",
+        "skill": -0.4136567184401263,
+        "surprise": 0.020892256771335164,
+        "frames": 786
+      },
+      {
+        "video": 19,
+        "class": "Avenue",
+        "skill": 0.02219562801394903,
+        "surprise": 0.02915088239297345,
+        "frames": 804
+      },
+      {
+        "video": 20,
+        "class": "Avenue",
+        "skill": -0.048060287051850725,
+        "surprise": 0.02490342959924856,
+        "frames": 639
+      },
+      {
+        "video": 21,
+        "class": "Avenue",
+        "skill": 0.04578960438315771,
+        "surprise": 0.030369810461997986,
+        "frames": 800
+      },
+      {
+        "video": 22,
+        "class": "Avenue",
+        "skill": 0.04346680225473376,
+        "surprise": 0.02756739086574978,
+        "frames": 450
+      },
+      {
+        "video": 24,
+        "class": "Avenue",
+        "skill": 0.0019772661764869692,
+        "surprise": 0.03546586850977907,
+        "frames": 792
+      },
+      {
+        "video": 25,
+        "class": "Avenue",
+        "skill": 0.03783775329202865,
+        "surprise": 0.04650191447091481,
+        "frames": 630
+      },
+      {
+        "video": 26,
+        "class": "Avenue",
+        "skill": -0.0658701087333744,
+        "surprise": 0.03050136255952062,
+        "frames": 269
+      },
+      {
+        "video": 27,
+        "class": "Avenue",
+        "skill": 0.028615100163249862,
+        "surprise": 0.029925750484191833,
+        "frames": 972
+      },
+      {
+        "video": 28,
+        "class": "Avenue",
+        "skill": -0.44574535274649785,
+        "surprise": 0.015879942612214523,
+        "frames": 418
+      },
+      {
+        "video": 29,
+        "class": "Avenue",
+        "skill": -0.30462449697897087,
+        "surprise": 0.018155740884443123,
+        "frames": 384
+      },
+      {
+        "video": 30,
+        "class": "Avenue",
+        "skill": -0.24488768330786526,
+        "surprise": 0.014100518099245432,
+        "frames": 861
+      },
+      {
+        "video": 31,
+        "class": "Avenue",
+        "skill": 0.040086347170898096,
+        "surprise": 0.03579642768640405,
+        "frames": 591
+      },
+      {
+        "video": 34,
+        "class": "Avenue",
+        "skill": 0.04814845807770429,
+        "surprise": 0.03323172710158608,
+        "frames": 66
+      },
+      {
+        "video": 35,
+        "class": "Avenue",
+        "skill": -0.17724661357074623,
+        "surprise": 0.016755957534347755,
+        "frames": 69
+      }
+    ],
+    "steps": 91835,
+    "final_weight_version": 1839,
+    "erank_min": 27.48230743408203,
+    "infer_ms_p50": 1.8795084906741977,
+    "infer_ms_p99": 6.989357993006742
+  },
+  "frozen": {
+    "frames_scored": 30636,
+    "duration_s": 1226.0582818984985,
+    "fps": 24.98739289339612,
+    "skill": -291.95421248443625,
+    "skill_last_third": -218.71486477512323,
+    "surprise_normal": 0.8957604499741378,
+    "surprise_anomaly": 0.9026958319840418,
+    "copy_normal": 0.003057680728935505,
+    "novelty_auc_raw": 0.6840059639546182,
+    "novelty_auc_z": 0.5693615024134843,
+    "novelty_auc_raw_incl_cuts": 0.6853445926687876,
+    "novelty_auc_macro_raw": 0.5984273565622927,
+    "novelty_auc_macro_z": 0.5918324093813168,
+    "n_videos_with_events": 19,
+    "per_video_auc": [
+      {
+        "video": 16,
+        "name": "test01",
+        "auc_raw": 0.6320661500858079,
+        "auc_z": 0.6472680941192044
+      },
+      {
+        "video": 17,
+        "name": "test02",
+        "auc_raw": 0.45755958833715804,
+        "auc_z": 0.4600233707358966
+      },
+      {
+        "video": 18,
+        "name": "test03",
+        "auc_raw": 0.5471249744084701,
+        "auc_z": 0.5737328536749436
+      },
+      {
+        "video": 19,
+        "name": "test04",
+        "auc_raw": 0.6944110094687851,
+        "auc_z": 0.6759615898999626
+      },
+      {
+        "video": 20,
+        "name": "test05",
+        "auc_raw": 0.5712148502475369,
+        "auc_z": 0.5325981043493666
+      },
+      {
+        "video": 21,
+        "name": "test06",
+        "auc_raw": 0.6753781755196305,
+        "auc_z": 0.6690098152424943
+      },
+      {
+        "video": 22,
+        "name": "test07",
+        "auc_raw": 0.6556613756613756,
+        "auc_z": 0.6154920634920635
+      },
+      {
+        "video": 24,
+        "name": "test09",
+        "auc_raw": 0.6722328388995056,
+        "auc_z": 0.6564670731337398
+      },
+      {
+        "video": 25,
+        "name": "test10",
+        "auc_raw": 0.3020309573104604,
+        "auc_z": 0.31615892733905154
+      },
+      {
+        "video": 26,
+        "name": "test11",
+        "auc_raw": 0.5827684233544719,
+        "auc_z": 0.6057049833564156
+      },
+      {
+        "video": 27,
+        "name": "test12",
+        "auc_raw": 0.5099058786586675,
+        "auc_z": 0.5165848579503198
+      },
+      {
+        "video": 28,
+        "name": "test13",
+        "auc_raw": 0.5825506527260913,
+        "auc_z": 0.620414673046252
+      },
+      {
+        "video": 29,
+        "name": "test14",
+        "auc_raw": 0.5764840182648402,
+        "auc_z": 0.5802654109589042
+      },
+      {
+        "video": 30,
+        "name": "test15",
+        "auc_raw": 0.5124661246612466,
+        "auc_z": 0.5207123499806426
+      },
+      {
+        "video": 31,
+        "name": "test16",
+        "auc_raw": 0.6106923721136919,
+        "auc_z": 0.5295595549402656
+      },
+      {
+        "video": 32,
+        "name": "test17",
+        "auc_raw": 0.5360137195121951,
+        "auc_z": 0.45229928861788615
+      },
+      {
+        "video": 33,
+        "name": "test18",
+        "auc_raw": 0.9101654846335697,
+        "auc_z": 0.9205673758865248
+      },
+      {
+        "video": 34,
+        "name": "test19",
+        "auc_raw": 0.7030532598714417,
+        "auc_z": 0.7185491276400368
+      },
+      {
+        "video": 35,
+        "name": "test20",
+        "auc_raw": 0.6383399209486166,
+        "auc_z": 0.6334462638810465
+      }
+    ],
+    "cut_frames_excluded": 1786,
+    "class_auc": {
+      "Avenue": {
+        "auc_raw": 0.5984273565622927,
+        "auc_z": 0.5918324093813168,
+        "n_videos": 19,
+        "n_anom": 3714,
+        "n_norm": 10548
+      }
+    },
+    "per_video": [
+      {
+        "video": 0,
+        "class": "AvenueNormal",
+        "skill": -912.7729247956765,
+        "surprise": 0.897892297964531,
+        "frames": 614
+      },
+      {
+        "video": 1,
+        "class": "AvenueNormal",
+        "skill": -318.00969668584696,
+        "surprise": 0.8960038186914704,
+        "frames": 1461
+      },
+      {
+        "video": 2,
+        "class": "AvenueNormal",
+        "skill": -452.05319986195633,
+        "surprise": 0.8830529666643799,
+        "frames": 1437
+      },
+      {
+        "video": 3,
+        "class": "AvenueNormal",
+        "skill": -348.2228119749656,
+        "surprise": 0.8908133165710679,
+        "frames": 1461
+      },
+      {
+        "video": 4,
+        "class": "AvenueNormal",
+        "skill": -306.3107684977333,
+        "surprise": 0.8990175346143885,
+        "frames": 765
+      },
+      {
+        "video": 5,
+        "class": "AvenueNormal",
+        "skill": -432.6210446702624,
+        "surprise": 0.891606529757717,
+        "frames": 1461
+      },
+      {
+        "video": 6,
+        "class": "AvenueNormal",
+        "skill": -259.1413664543665,
+        "surprise": 0.8991039576021346,
+        "frames": 1049
+      },
+      {
+        "video": 7,
+        "class": "AvenueNormal",
+        "skill": -278.8494586405073,
+        "surprise": 0.8890849190389482,
+        "frames": 967
+      },
+      {
+        "video": 8,
+        "class": "AvenueNormal",
+        "skill": -505.6188739865601,
+        "surprise": 0.8932331197302702,
+        "frames": 1341
+      },
+      {
+        "video": 9,
+        "class": "AvenueNormal",
+        "skill": -306.2337609501753,
+        "surprise": 0.8900343546070609,
+        "frames": 1173
+      },
+      {
+        "video": 10,
+        "class": "AvenueNormal",
+        "skill": -275.78527249647476,
+        "surprise": 0.8949668862425025,
+        "frames": 731
+      },
+      {
+        "video": 11,
+        "class": "AvenueNormal",
+        "skill": -112.0355710730662,
+        "surprise": 0.897799801826477,
+        "frames": 95
+      },
+      {
+        "video": 12,
+        "class": "AvenueNormal",
+        "skill": -249.59254482820842,
+        "surprise": 0.8963887651887121,
+        "frames": 316
+      },
+      {
+        "video": 13,
+        "class": "AvenueNormal",
+        "skill": -235.95966589202766,
+        "surprise": 0.9127536317576532,
+        "frames": 460
+      },
+      {
+        "video": 14,
+        "class": "AvenueNormal",
+        "skill": -185.9262269732096,
+        "surprise": 0.902668575839241,
+        "frames": 303
+      },
+      {
+        "video": 15,
+        "class": "AvenueNormal",
+        "skill": -161.87725724956857,
+        "surprise": 0.8985644668033442,
+        "frames": 194
+      },
+      {
+        "video": 16,
+        "class": "Avenue",
+        "skill": -413.7320440193342,
+        "surprise": 0.8956126294283471,
+        "frames": 938
+      },
+      {
+        "video": 17,
+        "class": "Avenue",
+        "skill": -331.56764133608704,
+        "surprise": 0.8937091460549902,
+        "frames": 1022
+      },
+      {
+        "video": 18,
+        "class": "Avenue",
+        "skill": -447.64848838915833,
+        "surprise": 0.9006247479497022,
+        "frames": 786
+      },
+      {
+        "video": 19,
+        "class": "Avenue",
+        "skill": -321.3811716363724,
+        "surprise": 0.9016934447917179,
+        "frames": 804
+      },
+      {
+        "video": 20,
+        "class": "Avenue",
+        "skill": -300.85008682504167,
+        "surprise": 0.9067143390249571,
+        "frames": 639
+      },
+      {
+        "video": 21,
+        "class": "Avenue",
+        "skill": -227.49439365895037,
+        "surprise": 0.8995472642034292,
+        "frames": 800
+      },
+      {
+        "video": 22,
+        "class": "Avenue",
+        "skill": -198.08008976443088,
+        "surprise": 0.9066106826729244,
+        "frames": 450
+      },
+      {
+        "video": 24,
+        "class": "Avenue",
+        "skill": -215.60081255277714,
+        "surprise": 0.8930457441343201,
+        "frames": 792
+      },
+      {
+        "video": 25,
+        "class": "Avenue",
+        "skill": -145.1564025379697,
+        "surprise": 0.9052863021691641,
+        "frames": 630
+      },
+      {
+        "video": 26,
+        "class": "Avenue",
+        "skill": -157.97493600508983,
+        "surprise": 0.9045677880815414,
+        "frames": 269
+      },
+      {
+        "video": 27,
+        "class": "Avenue",
+        "skill": -270.0979139160003,
+        "surprise": 0.9033678118829374,
+        "frames": 972
+      },
+      {
+        "video": 28,
+        "class": "Avenue",
+        "skill": -452.7621350923114,
+        "surprise": 0.8934555468661933,
+        "frames": 418
+      },
+      {
+        "video": 29,
+        "class": "Avenue",
+        "skill": -192.7948767640161,
+        "surprise": 0.8957690045547982,
+        "frames": 384
+      },
+      {
+        "video": 30,
+        "class": "Avenue",
+        "skill": -272.87849064981003,
+        "surprise": 0.8890771926072416,
+        "frames": 861
+      },
+      {
+        "video": 31,
+        "class": "Avenue",
+        "skill": -210.26309242525053,
+        "surprise": 0.898947022893102,
+        "frames": 591
+      },
+      {
+        "video": 34,
+        "class": "Avenue",
+        "skill": -66.14731513487608,
+        "surprise": 0.8875964536811366,
+        "frames": 66
+      },
+      {
+        "video": 35,
+        "class": "Avenue",
+        "skill": -151.79958751949397,
+        "surprise": 0.8952955638152965,
+        "frames": 69
+      }
+    ],
+    "steps": 0,
+    "final_weight_version": 1,
+    "erank_min": NaN,
+    "infer_ms_p50": 1.2305194977670908,
+    "infer_ms_p99": 2.1371605806052685
+  },
+  "live_dir": "runs/e1/20261003-100555-live",
+  "frozen_dir": "runs/e1/20261003-102624-frozen",
+  "warmup_s": 30.0,
+  "cut_exclude_s": 2.0
+}

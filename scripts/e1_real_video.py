@@ -112,11 +112,11 @@ def summarize(d: dict) -> dict:
     # Macro AUC: mean of per-video AUCs. Pooled ("micro") AUC across cameras is confounded by
     # each camera's own baseline surprise level; the served signal is the z-score precisely
     # because of that, so the z-scored micro AUC and the raw macro AUC are the honest numbers.
-    vid_auc_raw, vid_auc_z = [], []
+    vid_auc_raw, vid_auc_z, vid_auc_ids = [], [], []
     for r in np.unique(reg):
         m = clean & (reg == r)
         if m.sum() >= 50 and anom[m].sum() > 0 and (anom[m] == 0).sum() > 0:
-            vid_auc_raw.append(auc(s[m], anom[m])); vid_auc_z.append(auc(z[m], anom[m]))
+            vid_auc_raw.append(auc(s[m], anom[m])); vid_auc_z.append(auc(z[m], anom[m])); vid_auc_ids.append(int(r))
     per_video = []
     for r in np.unique(reg):
         m = clean & (reg == r) & (anom == 0)
@@ -137,6 +137,8 @@ def summarize(d: dict) -> dict:
         "novelty_auc_macro_raw": float(np.mean(vid_auc_raw)) if vid_auc_raw else float("nan"),
         "novelty_auc_macro_z": float(np.mean(vid_auc_z)) if vid_auc_z else float("nan"),
         "n_videos_with_events": len(vid_auc_raw),
+        "per_video_auc": [{"video": i, "name": d["plist"]["items"][i].get("name", str(i)), "auc_raw": a, "auc_z": b}
+                          for i, a, b in zip(vid_auc_ids, vid_auc_raw, vid_auc_z)],
         "cut_frames_excluded": int((ok & ~clean).sum()),
         "class_auc": class_auc, "per_video": per_video,
         "steps": int(lrn[-1]["step"]) if lrn else 0,
@@ -152,7 +154,7 @@ def plot(live: dict, frozen: dict, sl: dict, sf: dict, out: str, tag: str = "") 
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
     LIVE, FROZ, ANOM, CUT, INK, MUTED = "#2a78d6", "#eb6834", "#eda100", "#c3c2b7", "#0b0b0b", "#52514e"
-    fig, (ax0, ax1) = plt.subplots(2, 1, figsize=(14, 7.5), gridspec_kw={"height_ratios": [2.2, 1]})
+    fig, (ax0, ax1) = plt.subplots(2, 1, figsize=(14, 8.5), gridspec_kw={"height_ratios": [2, 1.1]})
     fig.patch.set_facecolor("white")
 
     def smooth(x, k=15):
@@ -178,14 +180,19 @@ def plot(live: dict, frozen: dict, sl: dict, sf: dict, out: str, tag: str = "") 
         ax0.spines[sp].set_visible(False)
     ax0.set_xlim(0, tm.max())
 
-    ks = sorted(set(sl["class_auc"]) | set(sf["class_auc"]))
-    x = np.arange(len(ks)); w = 0.38
-    ax1.bar(x - w / 2, [sl["class_auc"].get(k, {}).get("auc_raw", np.nan) for k in ks], w, color=LIVE, label="live")
-    ax1.bar(x + w / 2, [sf["class_auc"].get(k, {}).get("auc_raw", np.nan) for k in ks], w, color=FROZ, label="frozen")
+    # Per-clip novelty AUC, live vs frozen, sorted by the live value: one dot pair per clip.
+    pv_l = {v["video"]: v for v in sl["per_video_auc"]}; pv_f = {v["video"]: v for v in sf["per_video_auc"]}
+    ids = sorted(set(pv_l) & set(pv_f), key=lambda i: pv_l[i]["auc_raw"])
+    x = np.arange(len(ids))
+    for i, vid in enumerate(ids):
+        ax1.plot([i, i], [pv_f[vid]["auc_raw"], pv_l[vid]["auc_raw"]], color=CUT, lw=1.5, zorder=1)
+    ax1.scatter(x, [pv_f[i]["auc_raw"] for i in ids], color=FROZ, s=42, zorder=3, label=f"frozen (mean {sf['novelty_auc_macro_raw']:.2f})")
+    ax1.scatter(x, [pv_l[i]["auc_raw"] for i in ids], color=LIVE, s=42, zorder=4, label=f"live (mean {sl['novelty_auc_macro_raw']:.2f})")
     ax1.axhline(0.5, color=CUT, lw=1)
-    ax1.set_xticks(x); ax1.set_xticklabels([f"{k}\n(n={sl['class_auc'].get(k, {}).get('n_anom', 0)} evt frames)" for k in ks], fontsize=9)
-    ax1.set_ylim(0, 1); ax1.set_ylabel("novelty AUC by class (mean over videos)", color=INK)
-    ax1.legend(loc="upper right", frameon=False, ncol=2)
+    ax1.set_xticks(x); ax1.set_xticklabels([pv_l[i]["name"] for i in ids], fontsize=8, rotation=45, ha="right")
+    ax1.set_ylim(0, 1); ax1.set_ylabel("novelty AUC per clip (raw surprise)", color=INK)
+    ax1.set_xlabel("labelled test clips, sorted by live AUC   |   0.5 = chance", color=MUTED)
+    ax1.legend(loc="upper left", frameon=False, ncol=2)
     for sp in ("top", "right"):
         ax1.spines[sp].set_visible(False)
     fig.tight_layout()
