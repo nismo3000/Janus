@@ -1,0 +1,295 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Janus: how it works</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  :root { color-scheme: light; }
+  html, body { margin: 0; background: #fcfcfb; color: #0b0b0b; font-family: -apple-system, "Segoe UI", Inter, Roboto, sans-serif; }
+  .wrap { max-width: 1280px; margin: 0 auto; padding: 16px 20px 32px; }
+  h1 { font-size: 20px; font-weight: 600; margin: 0 0 4px; }
+  .sub { color: #52514e; font-size: 14px; margin-bottom: 12px; }
+  canvas { width: 100%; height: auto; display: block; border: 1px solid #e1e0d9; border-radius: 6px; background: #fcfcfb; }
+  .bar { display: flex; gap: 10px; align-items: center; margin: 12px 0; flex-wrap: wrap; }
+  button { font: inherit; font-size: 14px; padding: 6px 14px; border-radius: 6px; border: 1px solid #c3c2b7; background: #fff; color: #0b0b0b; cursor: pointer; }
+  button.primary { background: #2a78d6; border-color: #2a78d6; color: #fff; }
+  button:disabled { opacity: .4; cursor: default; }
+  .scene { font-size: 13px; color: #52514e; min-width: 90px; }
+  .cap { font-size: 16px; line-height: 1.45; min-height: 52px; padding: 10px 14px; border-left: 4px solid #2a78d6; background: #f5f4f0; border-radius: 0 6px 6px 0; }
+  .cap b { font-weight: 600; }
+  label { font-size: 13px; color: #52514e; }
+  input[type=range] { vertical-align: middle; }
+  .legend { display: flex; gap: 18px; font-size: 13px; color: #52514e; margin-top: 8px; flex-wrap: wrap; }
+  .sw { display: inline-block; width: 12px; height: 12px; border-radius: 3px; vertical-align: -1px; margin-right: 6px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Janus: one model, two faces</h1>
+  <div class="sub">It serves predictions on a live video stream and learns from that same stream at the same time. Every number here is illustrative, shaped like the measured v0 runs.</div>
+  <canvas id="c" width="1280" height="720"></canvas>
+  <div class="bar">
+    <button id="prev">&#9664; Prev</button>
+    <button id="play" class="primary">Pause</button>
+    <button id="next">Next &#9654;</button>
+    <span class="scene" id="scenelbl">scene 1 / 9</span>
+    <label>speed <input id="speed" type="range" min="0.25" max="3" step="0.25" value="1"> <span id="speedv">1.0x</span></label>
+    <label><input id="auto" type="checkbox" checked> auto-advance scenes</label>
+  </div>
+  <div class="cap" id="cap"></div>
+  <div class="legend">
+    <span><i class="sw" style="background:#2a78d6"></i>live: learns while serving</span>
+    <span><i class="sw" style="background:#eb6834"></i>frozen control: same stream, never trains</span>
+    <span><i class="sw" style="background:#1baf7a"></i>learner</span>
+    <span><i class="sw" style="background:#eda100"></i>out-of-regime event</span>
+  </div>
+</div>
+<script>
+(() => {
+const C = document.getElementById('c'), X = C.getContext('2d');
+const W = C.width, H = C.height;
+const INK='#0b0b0b', INK2='#52514e', MUTED='#898781', GRID='#e1e0d9', AXIS='#c3c2b7', SURF='#fcfcfb', BAND='#f1f0ec';
+const BLUE='#2a78d6', ORANGE='#eb6834', AQUA='#1baf7a', YELLOW='#eda100', VIOLET='#4a3aa7';
+
+// ---------------------------------------------------------------- scenes
+const SCENES = [
+  {len: 6,  cap: '<b>The stream.</b> Frames arrive at 30 fps from a fixed camera. Nothing is labelled. Janus never predicts pixels; it predicts what the <i>embedding</i> of a frame will be half a second from now.'},
+  {len: 9,  cap: '<b>Face one: the inferencer.</b> Each frame is encoded once. From the last two embeddings the predictor emits a guess for the frame 15 frames ahead (0.5 s). That guess is parked, tagged with the weight version that made it.'},
+  {len: 9,  cap: '<b>Scoring.</b> When the future frame arrives, its embedding is compared with the parked guess. The gap is <b>surprise</b>. It is always scored against a persistence baseline ("the future looks like now") and in the coordinate frame of the weights that made the guess.'},
+  {len: 10, cap: '<b>Face two: the learner.</b> Every frame also lands in a recent-frames ring. The learner trains on that ring plus a reservoir sample of the whole session (anti-forgetting), throttled to about three gradient steps per frame so it cannot memorise the ring.'},
+  {len: 10, cap: '<b>Hot-swap.</b> Every 50 steps the learner publishes its weights to a double-buffered bus. Between two frames the inferencer flips a pointer onto the new buffer: about 50 rebinds, ~0.3 ms. The weight version ticks; serving never pauses.'},
+  {len: 12, cap: '<b>The world changes.</b> A new regime starts. Surprise jumps for both faces. The live model re-learns and its surprise falls within the block; the frozen control stays high because nothing in it can move.'},
+  {len: 10, cap: '<b>An event.</b> Something that belongs to no regime appears for half a second. Surprise spikes and the z-scored spike is the served novelty signal: an unlabelled "I don\'t know". On the synthetic stream this separates events from normal frames with AUC 0.88.'},
+  {len: 12, cap: '<b>Next: grow and decay.</b> Capacity lives in a fixed slab allocated at maximum size and gated by masks. Surprise that stays high after the learner has had time to adapt unmasks a new expert; an expert that stops being routed to decays into an archive on disk. The slab never changes shape, so the serving engine never recompiles.'},
+  {len: 8,  cap: '<b>Why it matters.</b> The hardware limit at 30 fps is memory bandwidth, not capacity: the active weights are read once per frame. Routing keeps the active set inside that budget while total capacity grows. That is the design being measured in E1 to E3.'},
+];
+let scene = 0, sceneT = 0, playing = true, speed = 1, auto = true;
+
+// ---------------------------------------------------------------- simulated world
+const FPS = 30, HORIZON = 15, PUBLISH_EVERY = 50, STEPS_PER_FRAME = 3;
+let simFrame = 0;         // global frame counter
+let steps = 0, version = 1, lastPub = 0, swapFlash = 0;
+const tiles = [];         // frames in flight on the track: {f, regime, event}
+const live = [], frozen = [], events = [], cuts = [];   // surprise traces
+let regime = 0, regimeStart = 0, eventUntil = -1;
+let liveErr = 0.55, frozenErr = 0.95;
+const parked = [];        // {madeAt, due, version}
+
+function regimeColor(r) { return ['#2a78d6', '#1baf7a', '#4a3aa7', '#e34948', '#eda100', '#e87ba4'][r % 6]; }
+
+function drawTile(x, y, s, f, r, ev) {
+  X.save(); X.beginPath(); X.rect(x, y, s, s); X.clip();
+  X.fillStyle = '#1b1b1f'; X.fillRect(x, y, s, s);
+  const t = f / FPS, col = regimeColor(r);
+  if (r === 0) {            // bouncing blobs
+    for (let i = 0; i < 3; i++) {
+      const px = x + s * (0.5 + 0.38 * Math.sin(1.3 * t + i * 2.1)), py = y + s * (0.5 + 0.38 * Math.cos(0.9 * t + i * 1.4));
+      X.fillStyle = ['#e34948', '#1baf7a', '#2a78d6'][i]; X.beginPath(); X.arc(px, py, s * 0.16, 0, 7); X.fill();
+    }
+  } else if (r === 1) {     // scrolling bars
+    X.fillStyle = col;
+    for (let i = -1; i < 6; i++) { const bx = x + ((i * s / 4 + t * s * 0.6) % (s * 1.25)) - s * 0.125; X.fillRect(bx, y, s / 8, s); }
+  } else if (r === 2) {     // rings
+    for (let i = 0; i < 5; i++) { X.strokeStyle = col; X.lineWidth = 2; X.beginPath(); X.arc(x + s / 2, y + s / 2, ((i * 0.2 + t * 0.4) % 1) * s * 0.7, 0, 7); X.stroke(); }
+  } else {                  // lattice
+    X.fillStyle = col;
+    for (let i = 0; i < 4; i++) for (let j = 0; j < 4; j++) { X.beginPath(); X.arc(x + ((i + 0.5) / 4 + t * 0.2 + j * 0.1) % 1 * s, y + ((j + 0.5) / 4 + t * 0.1) % 1 * s, s * 0.06, 0, 7); X.fill(); }
+  }
+  if (ev) {                 // out-of-regime event: hard checker
+    for (let i = 0; i < 6; i++) for (let j = 0; j < 6; j++) if ((i + j) % 2 === 0) { X.fillStyle = '#ffffff'; X.fillRect(x + i * s / 6, y + j * s / 6, s / 6, s / 6); }
+  }
+  X.restore();
+  X.strokeStyle = ev ? YELLOW : AXIS; X.lineWidth = ev ? 2 : 1; X.strokeRect(x + 0.5, y + 0.5, s - 1, s - 1);
+}
+
+function stepSim(dt) {
+  // advance the simulated stream at FPS * speed, accumulate fractional frames
+  stepSim.acc = (stepSim.acc || 0) + dt * FPS * speed;
+  while (stepSim.acc >= 1) {
+    stepSim.acc -= 1; simFrame++;
+    if (scene >= 5 && simFrame - regimeStart > 240 && regime === 0) { regime = 1; regimeStart = simFrame; cuts.push(simFrame); liveErr = 0.95; frozenErr = 0.95; }
+    if (scene >= 5 && regime >= 1 && simFrame - regimeStart > 420) { regime = (regime % 3) + 1; regimeStart = simFrame; cuts.push(simFrame); liveErr = Math.max(liveErr, 0.85); frozenErr = 0.95; }
+    if (scene >= 6 && eventUntil < 0 && (simFrame % 170) === 0) { eventUntil = simFrame + 18; events.push([simFrame, simFrame + 18]); }
+    const ev = simFrame < eventUntil; if (simFrame >= eventUntil) eventUntil = -1;
+    tiles.push({f: simFrame, regime, event: ev});
+    if (tiles.length > 18) tiles.shift();
+    // learner
+    if (scene >= 3) { steps += STEPS_PER_FRAME; if (steps - lastPub >= PUBLISH_EVERY && scene >= 4) { lastPub = steps; version++; swapFlash = 1; } }
+    // adaptation: live error decays toward its floor at a rate that depends on learning; frozen stays
+    const floor = 0.55, k = scene >= 3 ? 0.012 : 0.0;
+    liveErr += (floor - liveErr) * k; frozenErr += (0.95 - frozenErr) * 0.002;
+    const noise = () => (Math.random() - 0.5) * 0.08;
+    live.push(ev ? liveErr + 0.45 + noise() : liveErr + noise());
+    frozen.push(ev ? frozenErr + 0.02 + noise() : frozenErr + noise());
+    if (live.length > 900) { live.shift(); frozen.shift(); }
+    // predictions in flight
+    if (scene >= 1) { parked.push({madeAt: simFrame, due: simFrame + HORIZON, version}); while (parked.length && parked[0].due < simFrame - 2) parked.shift(); }
+  }
+  swapFlash = Math.max(0, swapFlash - dt * 2.5);
+}
+
+// ---------------------------------------------------------------- drawing helpers
+function box(x, y, w, h, title, sub, color, active) {
+  X.fillStyle = active ? '#ffffff' : BAND; X.strokeStyle = active ? color : AXIS; X.lineWidth = active ? 2 : 1;
+  rr(x, y, w, h, 10); X.fill(); X.stroke();
+  X.fillStyle = INK; X.font = '600 16px sans-serif'; X.textAlign = 'center'; X.fillText(title, x + w / 2, y + 24);
+  X.fillStyle = INK2; X.font = '13px sans-serif'; X.fillText(sub, x + w / 2, y + 44);
+}
+function rr(x, y, w, h, r) { X.beginPath(); X.moveTo(x + r, y); X.arcTo(x + w, y, x + w, y + h, r); X.arcTo(x + w, y + h, x, y + h, r); X.arcTo(x, y + h, x, y, r); X.arcTo(x, y, x + w, y, r); X.closePath(); }
+function arrow(x1, y1, x2, y2, color, dashPhase, label) {
+  X.strokeStyle = color; X.lineWidth = 2; X.setLineDash([8, 6]); X.lineDashOffset = -dashPhase;
+  X.beginPath(); X.moveTo(x1, y1); X.lineTo(x2, y2); X.stroke(); X.setLineDash([]);
+  const a = Math.atan2(y2 - y1, x2 - x1); X.fillStyle = color; X.beginPath(); X.moveTo(x2, y2); X.lineTo(x2 - 10 * Math.cos(a - 0.4), y2 - 10 * Math.sin(a - 0.4)); X.lineTo(x2 - 10 * Math.cos(a + 0.4), y2 - 10 * Math.sin(a + 0.4)); X.fill();
+  if (label) { X.fillStyle = INK2; X.font = '12px sans-serif'; X.textAlign = 'center'; X.fillText(label, (x1 + x2) / 2, (y1 + y2) / 2 - 8); }
+}
+function text(s, x, y, size, color, align, weight) { X.fillStyle = color || INK; X.font = (weight || '') + ' ' + size + 'px sans-serif'; X.textAlign = align || 'left'; X.fillText(s, x, y); }
+
+// ---------------------------------------------------------------- frame
+let last = performance.now(), dash = 0;
+function frame(now) {
+  const dt = Math.min(0.05, (now - last) / 1000); last = now;
+  if (playing) { stepSim(dt); sceneT += dt; dash += dt * 60 * speed; if (auto && sceneT > SCENES[scene].len && scene < SCENES.length - 1) setScene(scene + 1); }
+  draw();
+  requestAnimationFrame(frame);
+}
+
+function draw() {
+  X.clearRect(0, 0, W, H); X.fillStyle = SURF; X.fillRect(0, 0, W, H);
+  const s = scene;
+  // ---- stream track (top)
+  const TY = 40, TS = 56, TX0 = 40, GAP = 8;
+  text('live stream, 30 fps', TX0, TY - 10, 13, INK2);
+  const nowIdx = tiles.length - 1;
+  for (let i = 0; i < tiles.length; i++) {
+    const t = tiles[i], x = TX0 + i * (TS + GAP);
+    drawTile(x, TY, TS, t.f, t.regime, t.event);
+  }
+  // "now" marker on the newest tile
+  const nowX = TX0 + nowIdx * (TS + GAP);
+  if (nowIdx >= 0) { X.fillStyle = INK; X.beginPath(); X.moveTo(nowX + TS / 2, TY + TS + 4); X.lineTo(nowX + TS / 2 - 6, TY + TS + 14); X.lineTo(nowX + TS / 2 + 6, TY + TS + 14); X.fill(); text('now  (frame ' + simFrame + ')', nowX + TS / 2, TY + TS + 28, 12, INK2, 'center'); }
+  // cut markers
+  for (const c of cuts) { const i = tiles.findIndex(t => t.f === c); if (i >= 0) { const x = TX0 + i * (TS + GAP); X.strokeStyle = MUTED; X.setLineDash([3, 3]); X.beginPath(); X.moveTo(x - 2, TY - 6); X.lineTo(x - 2, TY + TS + 6); X.stroke(); X.setLineDash([]); text('new regime', x, TY - 10, 12, MUTED); } }
+
+  // ---- inferencer (left), learner (right), bus (middle)
+  const IY = 148, IH = 158;
+  const infActive = s >= 1, lrnActive = s >= 3, busActive = s >= 4;
+  box(60, IY, 420, IH, 'Face one: INFERENCER', 'serves every frame, ~2 ms, never waits for the learner', BLUE, infActive);
+  box(800, IY, 420, IH, 'Face two: LEARNER', 'trains continuously on the same stream', AQUA, lrnActive);
+  // inferencer internals
+  const ex = 90, ey = IY + 70;
+  miniBox(ex, ey, 100, 40, 'encoder', infActive ? BLUE : AXIS); miniBox(ex + 130, ey, 110, 40, 'predictor', infActive ? BLUE : AXIS);
+  miniBox(ex + 270, ey, 100, 40, 'z  (t + 0.5 s)', infActive ? BLUE : AXIS, true);
+  if (infActive) { arrow(ex + 100, ey + 20, ex + 130, ey + 20, BLUE, dash); arrow(ex + 240, ey + 20, ex + 270, ey + 20, BLUE, dash); }
+  text('weights v' + version, 90, IY + IH - 14, 13, swapFlash > 0 ? ORANGE : INK2, 'left', swapFlash > 0 ? '600' : '');
+  text('context: 2 embeddings', ex + 130, IY + IH - 14, 12, MUTED);
+  // learner internals
+  const lx = 830, ly = IY + 70;
+  miniBox(lx, ly - 6, 110, 32, 'recent ring', lrnActive ? AQUA : AXIS); miniBox(lx, ly + 34, 110, 32, 'reservoir', lrnActive ? AQUA : AXIS);
+  miniBox(lx + 150, ly + 8, 100, 44, 'gradient step', lrnActive ? AQUA : AXIS);
+  miniBox(lx + 290, ly + 8, 100, 44, 'publish', busActive ? AQUA : AXIS);
+  if (lrnActive) { arrow(lx + 110, ly + 10, lx + 150, ly + 24, AQUA, dash); arrow(lx + 110, ly + 50, lx + 150, ly + 36, AQUA, dash); }
+  if (busActive) { arrow(lx + 250, ly + 30, lx + 290, ly + 30, AQUA, dash); text('every 50 steps', lx + 270, ly - 2, 11, INK2, 'center'); }
+  text('batch = half recent, half reservoir', lx, IY + IH - 12, 11, lrnActive ? INK2 : MUTED);
+  text('steps ' + steps + '  (' + STEPS_PER_FRAME + '/frame, throttled)', lx + 400, IY + IH - 12, 12, lrnActive ? INK2 : MUTED, 'right');
+  // frames -> both faces
+  if (nowIdx >= 0) { arrow(nowX + TS / 2, TY + TS + 34, 270, IY, INK2, dash); if (lrnActive) arrow(nowX + TS / 2, TY + TS + 34, 885, IY, AQUA, dash); }
+  // bus
+  const bx = 540, by = IY + 40, bw = 200, bh = 100;
+  X.fillStyle = busActive ? '#ffffff' : BAND; X.strokeStyle = busActive ? VIOLET : AXIS; X.lineWidth = busActive ? 2 : 1; rr(bx, by, bw, bh, 8); X.fill(); X.stroke();
+  text('weight bus', bx + bw / 2, by - 8, 13, busActive ? INK : MUTED, 'center', '600');
+  const act = version % 2;
+  for (let i = 0; i < 2; i++) { const sy = by + 14 + i * 42; X.fillStyle = (i === act && busActive) ? (swapFlash > 0 ? ORANGE : VIOLET) : BAND; X.strokeStyle = busActive ? VIOLET : AXIS; rr(bx + 14, sy, bw - 28, 32, 6); X.fill(); X.stroke(); text(i === act ? 'buffer ' + i + '  (serving v' + version + ')' : 'buffer ' + i + '  (landing zone)', bx + bw / 2, sy + 21, 12, (i === act && busActive) ? '#fff' : INK2, 'center'); }
+  if (busActive) { arrow(800, by + 50, bx + bw, by + 50, AQUA, dash, 'D2D copy'); arrow(bx, by + 50, 480, by + 50, swapFlash > 0 ? ORANGE : VIOLET, dash, swapFlash > 0 ? 'POINTER FLIP' : 'pointer flip between frames'); }
+
+  // ---- parked predictions timeline (scene 1-2)
+  if (s >= 1) {
+    const py = 344; text('predictions in flight, each tagged with the weight version that made it', 60, py - 8, 12, INK2);
+    X.strokeStyle = GRID; X.beginPath(); X.moveTo(60, py + 18); X.lineTo(480, py + 18); X.stroke();
+    for (const p of parked) {
+      const age = simFrame - p.madeAt; const x = 60 + 420 * (1 - Math.min(1, (p.due - simFrame + 2) / (HORIZON + 2)));
+      const due = p.due <= simFrame;
+      X.fillStyle = due ? (s >= 2 ? ORANGE : BLUE) : BLUE; X.globalAlpha = due ? 1 : 0.55; X.beginPath(); X.arc(x, py + 18, due ? 6 : 4, 0, 7); X.fill(); X.globalAlpha = 1;
+      if (age === 0) text('v' + p.version, x, py + 34, 10, MUTED, 'center');
+    }
+    text('made now', 60, py + 46, 11, MUTED); text(s >= 2 ? 'due: surprise = |z_pred - z_actual|, vs persistence' : 'due 0.5 s later', 480, py + 46, 11, MUTED, 'right');
+  }
+
+  // ---- surprise trace (bottom)
+  const GX = 60, GY = 420, GW = 1160, GH = 230;
+  X.fillStyle = '#fff'; X.fillRect(GX, GY, GW, GH); X.strokeStyle = GRID; X.strokeRect(GX, GY, GW, GH);
+  text('surprise (prediction error), last 30 s', GX, GY - 8, 13, INK2);
+  for (let i = 1; i < 4; i++) { const y = GY + GH * i / 4; X.strokeStyle = GRID; X.beginPath(); X.moveTo(GX, y); X.lineTo(GX + GW, y); X.stroke(); }
+  const n = live.length, x0 = simFrame - n;
+  const xs = f => GX + GW * (f - x0) / 900, ys = v => GY + GH - GH * Math.min(1.45, Math.max(0, v)) / 1.45;
+  for (const c of cuts) if (c >= x0) { X.strokeStyle = MUTED; X.setLineDash([4, 4]); X.beginPath(); X.moveTo(xs(c), GY); X.lineTo(xs(c), GY + GH); X.stroke(); X.setLineDash([]); text('regime change', xs(c) + 4, GY + 14, 11, MUTED); }
+  for (const [a, b] of events) if (b >= x0) { X.fillStyle = YELLOW; X.globalAlpha = 0.22; X.fillRect(xs(a), GY, Math.max(2, xs(b) - xs(a)), GH); X.globalAlpha = 1; }
+  if (s >= 2) {
+    const smooth = (arr, k) => arr.map((_, i) => { let a = 0, c = 0; for (let j = Math.max(0, i - k); j <= i; j++) { a += arr[j]; c++; } return a / c; });
+    const ls = smooth(live, 6), fs = smooth(frozen, 6);
+    if (s >= 5) { X.strokeStyle = ORANGE; X.lineWidth = 2; X.beginPath(); fs.forEach((v, i) => i ? X.lineTo(xs(x0 + i), ys(v)) : X.moveTo(xs(x0 + i), ys(v))); X.stroke(); text('frozen control', xs(x0 + n - 1) - 6, ys(fs[n - 1]) - 8, 12, ORANGE, 'right', '600'); }
+    X.strokeStyle = BLUE; X.lineWidth = 2; X.beginPath(); ls.forEach((v, i) => i ? X.lineTo(xs(x0 + i), ys(v)) : X.moveTo(xs(x0 + i), ys(v))); X.stroke();
+    text('live', xs(x0 + n - 1) - 6, ys(ls[n - 1]) + 16, 12, BLUE, 'right', '600');
+    if (s >= 6 && events.length) { const [a] = events[events.length - 1]; if (a >= x0) text('novelty spike', xs(a), GY + GH - 8, 12, '#8a5a00', 'left', '600'); }
+    if (s >= 5 && cuts.length) { const c = cuts[cuts.length - 1]; if (c >= x0 && simFrame - c > 150) text('re-learned within the block', xs(c) + 6, GY + GH - 26, 12, BLUE); }
+  } else { text(s < 2 ? 'waiting for the first parked prediction to come due' : '', GX + GW / 2, GY + GH / 2, 13, MUTED, 'center'); }
+
+  // ---- grow/decay overlay (scenes 7-8)
+  if (s >= 7) drawGrow(s);
+
+  // scene index
+  text((s + 1) + ' / ' + SCENES.length, W - 20, H - 12, 12, MUTED, 'right');
+}
+
+function miniBox(x, y, w, h, label, color, dashed) {
+  X.fillStyle = '#fff'; X.strokeStyle = color; X.lineWidth = 1.5; if (dashed) X.setLineDash([4, 3]); rr(x, y, w, h, 6); X.fill(); X.stroke(); X.setLineDash([]);
+  text(label, x + w / 2, y + h / 2 + 4, 12, INK, 'center');
+}
+
+function drawGrow(s) {
+  // panel over the inferencer: a fixed slab of 8 expert slots; masks open/close with time
+  const px = 60, py = 148, pw = 420, ph = 158;
+  X.fillStyle = '#fcfcfb'; rr(px, py, pw, ph, 10); X.fill(); X.strokeStyle = BLUE; X.lineWidth = 2; X.stroke();
+  text('fixed slab, 8 expert slots, masks only (no reshape, no recompile)', px + pw / 2, py + 22, 13, INK, 'center', '600');
+  const t = sceneT;
+  for (let i = 0; i < 8; i++) {
+    const sx = px + 22 + i * 48, sy = py + 40, sw = 40, sh = 54;
+    let state = 'free';
+    if (i < 3) state = 'live';
+    if (i === 3) state = t > 3 ? 'live' : (t > 1.5 ? 'growing' : 'free');
+    if (i === 1) state = t > 7 ? 'archived' : 'live';
+    if (i === 4 && s >= 8) state = t > 2 ? 'live' : 'free';
+    const col = {live: BLUE, growing: YELLOW, archived: MUTED, free: GRID}[state];
+    X.fillStyle = state === 'free' ? '#fff' : col; X.globalAlpha = state === 'archived' ? 0.35 : 1; rr(sx, sy, sw, sh, 6); X.fill(); X.globalAlpha = 1; X.strokeStyle = state === 'free' ? AXIS : col; X.lineWidth = 1.5; X.stroke();
+    text(state === 'live' ? 'on' : state === 'growing' ? 'grow' : state === 'archived' ? 'arch' : 'free', sx + sw / 2, sy + sh + 14, 11, INK2, 'center');
+  }
+  text('router picks one expert per frame,', px + pw / 2, py + ph - 24, 11, INK2, 'center');
+  text('so bytes read per frame stay inside the bandwidth budget', px + pw / 2, py + ph - 10, 11, INK2, 'center');
+  const msg = t < 1.5 ? 'sustained surprise after the learner had time to adapt...' : t < 3 ? '...unmasks a free slot (warm-started from the busiest expert)' : t < 7 ? 'new regime now has its own capacity; nothing serving the old ones was touched' : 'an expert nobody routes to (checked on replay too) decays to an archive on NVMe, pageable back';
+  text(msg, 540, 362, 13, INK, 'left', '600');
+}
+
+// ---------------------------------------------------------------- controls
+function setScene(i) {
+  scene = Math.max(0, Math.min(SCENES.length - 1, i)); sceneT = 0;
+  if (scene < 5) { cuts.length = 0; regime = 0; regimeStart = simFrame; liveErr = Math.min(liveErr, 0.6); frozenErr = 0.95; }
+  if (scene < 6) { events.length = 0; eventUntil = -1; }
+  document.getElementById('cap').innerHTML = SCENES[scene].cap;
+  document.getElementById('scenelbl').textContent = 'scene ' + (scene + 1) + ' / ' + SCENES.length;
+  document.getElementById('prev').disabled = scene === 0; document.getElementById('next').disabled = scene === SCENES.length - 1;
+}
+document.getElementById('prev').onclick = () => setScene(scene - 1);
+document.getElementById('next').onclick = () => setScene(scene + 1);
+document.getElementById('play').onclick = e => { playing = !playing; e.target.textContent = playing ? 'Pause' : 'Play'; };
+document.getElementById('speed').oninput = e => { speed = +e.target.value; document.getElementById('speedv').textContent = speed.toFixed(2).replace(/\.?0+$/, '') + 'x'; };
+document.getElementById('auto').onchange = e => { auto = e.target.checked; };
+document.addEventListener('keydown', e => { if (e.key === 'ArrowRight') setScene(scene + 1); if (e.key === 'ArrowLeft') setScene(scene - 1); if (e.key === ' ') { e.preventDefault(); document.getElementById('play').click(); } });
+const h = /scene=(\d+)/.exec(location.hash);
+setScene(h ? (+h[1] - 1) : 0);
+if (h && h[1] > 1) { for (let i = 0; i < 400; i++) { stepSim(1 / 30); } sceneT = Math.min(8, SCENES[scene].len - 2); }   // pre-roll so a linked scene is not empty
+draw();
+requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>
