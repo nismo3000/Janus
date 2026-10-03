@@ -89,8 +89,8 @@ def plot(stats: list, out: str) -> None:
         ax.set_ylabel("ms", color=MUTED)
         for sp in ("top", "right"):
             ax.spines[sp].set_visible(False)
-    axes[0].legend(frameon=False, fontsize=8, title="light = p50, solid = p99", title_fontsize=8)
-    fig.suptitle("E2  weight hot-swap on one GPU: host-memory bus vs single-pool device bus", color=INK, fontsize=11)
+    axes[0].legend(frameon=False, fontsize=8, loc="upper left")
+    fig.suptitle("E2  weight hot-swap on one GPU: host-memory bus vs single-pool device bus   (light = p50, solid = p99)", color=INK, fontsize=11)
     fig.tight_layout()
     fig.savefig(out, dpi=130)
     print(f"plot -> {out}")
