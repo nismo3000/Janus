@@ -13,7 +13,7 @@ from datetime import datetime
 import torch
 import torch.multiprocessing as tmp
 
-from .bus import DisplayBus, FrameRing, WeightBus
+from .bus import DeviceWeightBus, DisplayBus, FrameRing, WeightBus
 from .config import Config
 from .inferencer import inferencer_main
 from .learner import learner_main
@@ -45,6 +45,8 @@ def build_args() -> argparse.Namespace:
                    help="auto-resync the dream after N rollout steps (0 = never, free-running)")
     p.add_argument("--infer-log-every", type=int, default=1,
                    help="write every Nth scored frame to infer.jsonl (raise for long-lived runs)")
+    p.add_argument("--weight-bus", default="host", choices=["host", "device"],
+                   help="device = single-pool double buffer on one shared GPU (E2)")
     p.add_argument("--tag", default="run")
     p.add_argument("--runs-dir", default=os.path.expanduser("~/janus/runs"))
     return p.parse_args()
@@ -68,6 +70,7 @@ def config_from_args(a: argparse.Namespace) -> Config:
         regime_seconds=a.regime_seconds, seed=a.seed,
         viewer_port=a.viewer_port, viewer_host=a.viewer_host, display_every=a.display_every,
         dream_max_steps=a.dream_max_steps, infer_log_every=a.infer_log_every,
+        weight_bus=a.weight_bus,
     )
 
 
@@ -80,7 +83,12 @@ def launch(cfg: Config, run_dir: str) -> str:
     torch.manual_seed(cfg.seed)
     seed_model = WorldModel(cfg.dim, cfg.width, cfg.context_frames, cfg.hidden, cfg.ema_decay,
                             cfg.action_dim, cfg.res)
-    bus = WeightBus(state_numel(seed_model))
+    if cfg.weight_bus == "device":
+        if cfg.device_infer != cfg.device_learn or not cfg.device_infer.startswith("cuda"):
+            raise SystemExit("--weight-bus device needs learner and inferencer on one CUDA device")
+        bus = DeviceWeightBus(state_numel(seed_model), cfg.device_infer)
+    else:
+        bus = WeightBus(state_numel(seed_model))
     bus.publish(seed_model)
 
     ring = FrameRing(cfg.ring_frames, cfg.res, cfg.action_dim)

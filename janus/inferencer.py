@@ -22,7 +22,7 @@ from typing import Optional
 import numpy as np
 import torch
 
-from .bus import DisplayBus, FlatLayout, FrameRing, WeightBus
+from .bus import DeviceWeightBus, DisplayBus, FlatLayout, FrameRing, WeightBus
 from .frames import to_model_input
 from .model import Encoder, WorldModel, match_scale, prediction_error
 from .sources import open_stream
@@ -170,9 +170,50 @@ class WeightFetcher:
             self.consumed.record(stream)
         return v
 
+    def mark_consumed(self) -> None:          # host path: the `consumed` event does this
+        pass
+
     @property
     def current(self) -> torch.Tensor:
         return self.bufs[self.active]
+
+
+class DeviceSwapper:
+    """Single-pool counterpart of WeightFetcher (E2). The learner already landed the
+    weights in a shared device slot, so a swap is the pointer rebind and nothing else
+    moves. Same interface as WeightFetcher so the frame loop does not care."""
+
+    def __init__(self, bus: DeviceWeightBus, layout: FlatLayout, device: torch.device,
+                 init_version: int):
+        self.bus, self.layout, self.device, self.version = bus, layout, device, init_version
+        self._pending: Optional[int] = None
+
+    def start(self) -> "DeviceSwapper":
+        return self
+
+    def stop(self) -> None:
+        pass
+
+    def swap_if_ready(self, model: torch.nn.Module) -> Optional[int]:
+        v = self.bus.current_version()
+        if v <= self.version:
+            return None
+        self.layout.bind(model, self.bus.slot(v))
+        self.version = v
+        self._pending = v
+        return v
+
+    def mark_consumed(self) -> None:
+        """Frame thread, end of frame: the stream has drained (the frame's .item() calls),
+        so the writer may now reuse any slot older than the one we are bound to."""
+        if self._pending is not None:
+            torch.cuda.current_stream(self.device).synchronize()
+            self.bus.mark_consumed(self._pending)
+            self._pending = None
+
+    @property
+    def current(self) -> torch.Tensor:
+        return self.bus.slot(self.version)
 
 
 class ScorerRing:
@@ -248,8 +289,12 @@ def inferencer_main(cfg, ring: FrameRing, bus: WeightBus, stop_event, run_dir: s
     # From here on the model's parameters are views into the fetcher's active
     # device buffer; the original .to(device) tensors are dropped.
     layout = FlatLayout(model)
-    fetcher = WeightFetcher(bus, layout, device, init_version=version)
-    fetcher.current.copy_(torch.cat([model.state_dict()[k].reshape(-1) for k, *_ in layout.entries]))
+    if isinstance(bus, DeviceWeightBus):
+        # E2 single pool: the model's parameters are views straight into the shared slot.
+        fetcher = DeviceSwapper(bus, layout, device, init_version=version)
+    else:
+        fetcher = WeightFetcher(bus, layout, device, init_version=version)
+        fetcher.current.copy_(torch.cat([model.state_dict()[k].reshape(-1) for k, *_ in layout.entries]))
     layout.bind(model, fetcher.current)
     fetcher.start()
 
@@ -341,10 +386,12 @@ def inferencer_main(cfg, ring: FrameRing, bus: WeightBus, stop_event, run_dir: s
 
             # Hot-swap: the fetcher has already landed the new version on-device;
             # this is a pointer rebind plus one D2D copy of the target span.
+            t_sw = time.perf_counter()
             swapped = fetcher.swap_if_ready(model)
             if swapped is not None:
                 version, swaps = swapped, swaps + 1
                 scorers.snapshot(version, fetcher.current)
+            swap_ms = (time.perf_counter() - t_sw) * 1e3
 
             now = time.time()
             frames += 1
@@ -370,6 +417,8 @@ def inferencer_main(cfg, ring: FrameRing, bus: WeightBus, stop_event, run_dir: s
                         "swap": int(swapped is not None),
                         "ms": last_ms,
                     }
+                    if swapped is not None:
+                        rec["swap_ms"] = swap_ms
                     for k in ("src_frame", "video", "cut_age"):   # real-video labels
                         if k in meta:
                             rec[k] = meta[k]
@@ -398,6 +447,8 @@ def inferencer_main(cfg, ring: FrameRing, bus: WeightBus, stop_event, run_dir: s
                     meta.get("regime", -1), meta.get("anomaly", 0),
                     last_ms, swaps, dream.seeds,
                 ])
+
+            fetcher.mark_consumed()           # device bus: release the previous slot to the writer
 
             if now - last_beat >= 5.0:
                 print(f"[infer] {now - t0:6.1f}s  frames={frames}  fps={frames / (now - t0):5.1f}  "

@@ -50,6 +50,8 @@ class Config:
 
     # --- weight bus ---
     publish_every: int = 50         # learner publishes weights every N optimizer steps
+    weight_bus: str = "host"        # host: shared host memory + fetcher thread (works across GPUs)
+                                    # device: one shared GPU pool, publish = D2D, swap = rebind (E2)
 
     # --- decoder probe (pixels for humans; gradients never reach the encoder) ---
     lambda_rec: float = 1.0         # L1 reconstruction weight for the probe decoder
