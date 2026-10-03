@@ -47,7 +47,8 @@ class SyntheticWorld:
 
     def __init__(self, res: int, fps: float, seed: int, regime_seconds: float,
                  anomaly_every_s: float, anomaly_len_s: float,
-                 n_regimes: int = N_REGIMES, late_regime_after_s: float = -1.0):
+                 n_regimes: int = N_REGIMES, late_regime_after_s: float = -1.0,
+                 late_mode: str = "cycle", solo_blocks: int = 12):
         self.res = res
         self.fps = fps
         self.regime_seconds = regime_seconds
@@ -56,6 +57,12 @@ class SyntheticWorld:
         # in-stream, not just by probe). late_regime_after_s < 0 = never.
         self.n_regimes = n_regimes
         self.late_after = late_regime_after_s
+        # "cycle": the new regime joins the cycle (old ones keep recurring, retention is
+        # measured in-stream but confounded by relearning). "solo": the new regime runs alone
+        # for `solo_blocks` blocks, then the old regimes return once -- their first seconds
+        # back are the forgetting measurement -- then the cycle continues.
+        self.late_mode = late_mode
+        self.solo_blocks = solo_blocks
         self.anomaly_every_s = anomaly_every_s
         self.anomaly_len_s = anomaly_len_s
         self.x, self.y = _grid(res)
@@ -78,6 +85,13 @@ class SyntheticWorld:
         b0 = int(np.ceil(self.late_after / self.regime_seconds))
         if block < b0:
             return block % self.n_regimes
+        if self.late_mode == "solo":
+            k = block - b0
+            if k < self.solo_blocks:
+                return self.n_regimes                      # the new regime, alone
+            k -= self.solo_blocks
+            r = k % (self.n_regimes + 1)                   # then 0..n-1 return, then new, ...
+            return r if r < self.n_regimes else self.n_regimes
         r = (block - b0) % (self.n_regimes + 1)
         return self.n_regimes if r == 0 else r - 1
 
@@ -153,7 +167,8 @@ class SyntheticWorld:
 def synthetic_stream(cfg) -> Iterator[Frame]:
     world = SyntheticWorld(cfg.res, cfg.fps, cfg.seed, cfg.regime_seconds,
                            cfg.anomaly_every_s, cfg.anomaly_len_s,
-                           getattr(cfg, "n_regimes", N_REGIMES), getattr(cfg, "late_regime_after_s", -1.0))
+                           getattr(cfg, "n_regimes", N_REGIMES), getattr(cfg, "late_regime_after_s", -1.0),
+                           getattr(cfg, "late_mode", "cycle"), getattr(cfg, "solo_blocks", 12))
     pacer = Pacer(cfg.fps)
     i = 0
     while True:

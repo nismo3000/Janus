@@ -42,7 +42,12 @@ CONFIGS = {
     # enough that the fixed baseline actually forgets.
     "fixed-small": ["--width", "16", "--hidden", "256"],
     "cbp-small": ["--cbp", "--width", "16", "--hidden", "256"],
+    # Sequential ("solo") schedule: regime 6 alone for 12 blocks (9 min) after 630 s, then the old
+    # regimes return once. Their first EARLY_S seconds back are the forgetting measurement.
+    "fixed-solo": ["--late-mode", "solo"],
+    "cbp-solo": ["--cbp", "--late-mode", "solo"],
 }
+EARLY_S = 10.0
 
 
 def run_one(tag: str, duration: float, extra: list, seed: int) -> str:
@@ -68,8 +73,10 @@ def blocks(run_dir: str) -> list:
         if m.sum() < 100:
             continue
         r = int(np.bincount(reg[m]).argmax())
+        e = m & (t < k * BLOCK_S + EARLY_S)                 # first seconds of the block, before relearning
         out.append({"block": int(k), "t0": float(k * BLOCK_S), "regime": r,
-                    "skill": _skill(s[m], c[m]), "surprise": float(s[m].mean()), "n": int(m.sum())})
+                    "skill": _skill(s[m], c[m]), "skill_early": _skill(s[e], c[e]) if e.sum() > 20 else float("nan"),
+                    "surprise": float(s[m].mean()), "n": int(m.sum())})
     return out
 
 
@@ -84,9 +91,19 @@ def summarize(name: str, run_dir: str) -> dict:
     post_by_r = {r: np.mean([x["skill"] for x in post if x["regime"] == r]) for r in range(N_BASE)}
     last_cycle = post[-(N_BASE + 1):]
     last_by_r = {r: np.mean([x["skill"] for x in last_cycle if x["regime"] == r]) for r in range(N_BASE)}
+    # Forgetting on return: for each old regime, skill in the first EARLY_S of its first block after
+    # the new regime arrived, minus its full-block skill in the last pre-arrival cycle. Only
+    # meaningful on the solo schedule (on the cycle schedule the gap between visits is one cycle).
+    first_back = {}
+    for x in post:
+        if x["regime"] < N_BASE and x["regime"] not in first_back:
+            first_back[x["regime"]] = x
+    forget = {r: float(first_back[r]["skill_early"] - pre_by_r[r]) for r in first_back if np.isfinite(first_back[r]["skill_early"])}
     lrn = [r for r in load_jsonl(f"{run_dir}/learn.jsonl") if "step" in r]
     probes = [r["probe_err"] for r in lrn if np.isfinite(r.get("probe_err", np.nan))]
     return {
+        "forget_on_return": forget,
+        "forget_on_return_mean": float(np.mean(list(forget.values()))) if forget else float("nan"),
         "name": name, "dir": os.path.basename(run_dir), "blocks": bl,
         "parity_skill_pre": parity,
         "old_skill_pre": pre_by_r, "old_skill_post": post_by_r, "old_skill_last_cycle": last_by_r,
@@ -145,12 +162,15 @@ def analyze(named: list, tag: str = "") -> None:
         json.dump(sums, f, indent=2)
     print(f"\n{'metric':<30}" + "".join(f"{s['name']:>14}" for s in sums))
     for k in ("steps", "cbp_replaced", "parity_skill_pre", "new_skill_final", "time_to_parity_appearances",
-              "retention_delta", "probe_final"):
+              "retention_delta", "forget_on_return_mean", "probe_final"):
         fmt = lambda v: f"{v:.3f}" if isinstance(v, float) else str(v)
         print(f"{k:<30}" + "".join(f"{fmt(s[k]):>14}" for s in sums))
     print("\nregime-6 skill by appearance:")
     for s in sums:
         print(f"  {s['name']:<8}", " ".join(f"{v:+.3f}" for v in s["new_skill_by_appearance"]))
+    print("\nforgetting on return (first 10 s back minus pre-6 skill), per old regime:")
+    for s in sums:
+        print(f"  {s['name']:<12}", " ".join(f"r{r}:{v:+.2f}" for r, v in sorted(s['forget_on_return'].items())))
     print("\nold-regime skill, last pre-6 cycle -> last cycle:")
     for s in sums:
         print(f"  {s['name']:<8}", " ".join(f"r{r}:{s['old_skill_pre'][r]:+.2f}->{s['old_skill_last_cycle'][r]:+.2f}" for r in range(N_BASE)))

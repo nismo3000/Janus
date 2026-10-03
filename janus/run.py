@@ -41,6 +41,8 @@ def build_args() -> argparse.Namespace:
     p.add_argument("--regime-seconds", type=float, default=45.0)
     p.add_argument("--cbp", action="store_true", help="E3 baseline: continual backprop on the predictor")
     p.add_argument("--cbp-rate", type=float, default=1e-4)
+    p.add_argument("--late-mode", default="cycle", choices=["cycle", "solo"])
+    p.add_argument("--solo-blocks", type=int, default=12)
     p.add_argument("--late-regime-after", type=float, default=-1.0,
                    help="E3: seconds into the stream at which regime 6 first appears (<0 = never)")
     p.add_argument("--viewer-port", type=int, default=0,
@@ -72,6 +74,7 @@ def config_from_args(a: argparse.Namespace) -> Config:
         action_dim=action_dim, use_actions=not a.no_actions,
         frozen=a.frozen, no_replay=a.no_replay, duration_s=a.duration,
         regime_seconds=a.regime_seconds, late_regime_after_s=a.late_regime_after, seed=a.seed,
+        late_mode=a.late_mode, solo_blocks=a.solo_blocks,
         cbp=a.cbp, cbp_rate=a.cbp_rate,
         viewer_port=a.viewer_port, viewer_host=a.viewer_host, display_every=a.display_every,
         dream_max_steps=a.dream_max_steps, infer_log_every=a.infer_log_every,
