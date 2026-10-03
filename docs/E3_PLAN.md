@@ -98,7 +98,56 @@ neither helped nor hurt, which is what you expect when no unit is saturated. The
 were still worth having: they validate the harness and the schedule, and they put a ceiling on
 the stream's difficulty.
 
-Next: the same pair at reduced capacity (`fixed-small`, `cbp-small`: encoder width 16, predictor
-hidden 256, ~1/5 the parameters), queued 2026-10-03 11:53. If the small fixed model forgets
-(retention < 0) the E3 stream is settled; if not, the stream needs more regimes or longer blocks,
-which is a protocol change to bring to Mike with the grow/decay decisions.
+Follow-ups the same day: (a) `fixed-small` (encoder width 16, predictor hidden 256): still no
+forgetting on the cycle schedule, regime-6 parity in 3 appearances instead of 2; (b) the cycle
+schedule itself cannot observe forgetting, because every old regime is shown and relearned
+before it is scored. So the schedule was changed.
+
+## Result, 2026-10-03: sequential ("solo") schedule, fixed vs CBP vs no-replay
+
+Regimes 1–5 cycle to 630 s; regime 6 runs **alone for 12 blocks (9 min)**; regimes 1–5 return
+once; then the six-regime cycle continues. Forgetting = skill in the **first 10 s** of each old
+regime's first block back (before relearning) minus its block skill in the last pre-6 cycle.
+1500 s, seed 0, one time-sliced GPU, identical frames for all three. `e3_regime6_solo.png`,
+`../runs/e3/e3_summary_solo.json`.
+
+| | fixed (v0) | cbp | no-replay |
+|---|---:|---:|---:|
+| learner steps | 121,336 | 119,194 | 121,983 |
+| units reset | 0 | 24,390 | 0 |
+| regime-6 skill, end of its solo stretch | +0.85 | +0.84 | **+0.87** |
+| regime-6 skill after the old regimes returned | +0.84 | +0.84 | **+0.53** |
+| **forgetting on return, mean over regimes 1–5** | **+0.06** | +0.05 | **−0.37** |
+| worst regime on return | −0.03 (r5) | −0.03 (r5) | −0.75 (r2), −0.66 (r5) |
+| probe error on early clips, final | 0.427 | 0.453 | 0.774 |
+
+Reading it:
+
+1. **The reservoir is the whole anti-forgetting story at this scale.** Without replay the model
+   forgets three of five old regimes within nine minutes of not seeing them (and then forgets
+   regime 6 again when they return). With Vitter replay, every old regime comes back *better*
+   than it left, at the same regime-6 skill. This is the v0 retention claim, now measured on a
+   sequential schedule with a pre-relearning window rather than by the probe alone.
+2. **Continual backprop adds nothing on top of replay** (24k resets, every number within noise
+   of fixed). Resets recycle capacity the model does not need here.
+3. **No-replay learns the new regime slightly faster** (+0.87 vs +0.85 at the end of the solo
+   stretch): the classic stability/plasticity trade, small here.
+4. **Therefore this world cannot show what grow/decay buys.** v0 with replay is already at
+   "parity in two appearances, zero forgetting" on 5+1 toy regimes at 2.7M and at ~0.5M
+   parameters. A grow/decay model can only tie. The regime-6 test needs a world where capacity
+   binds: either parameterised regime families (20+ regimes from the five renderers with random
+   parameters, keeps ground truth; recommended), real multi-scene video (E1 shows capacity binds
+   there, but event labels are the problem), or a model shrunk until it breaks (proves little).
+
+What E3 did settle: the harness, the sequential schedule, the forgetting-on-return metric, and
+the three baselines are built and committed; the stream's difficulty has a measured ceiling; the
+reservoir's effect has a measured size (+0.43 skill on return, averaged over five regimes).
+
+## Decisions for Mike (updated)
+
+1. **Unit of growth:** A (expert blocks + router) or B (masked units)? Recommendation: A.
+2. **Growth trigger:** surprise-only, or surprise AND learner plateau? Recommendation: both.
+3. **Decay score:** routing share over recent traffic AND reservoir replay, floor 2 %, archive
+   never delete. Recommendation: as stated.
+4. **New: the E3 world.** Parameterised regime families (recommended), real multi-scene video,
+   or shrink the model. Without this the E3 result for the provisional patent is "v0 ties".
