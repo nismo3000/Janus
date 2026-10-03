@@ -88,6 +88,33 @@ def build(a) -> str:
     return path
 
 
+AVENUE = os.path.join(ROOT, "data", "avenue", "avenue")
+
+
+def build_avenue(a) -> str:
+    """CUHK Avenue: one fixed camera. Stream = 16 normal training clips then the 21 test
+    clips, whose frame-level labels come from avenue.mat (1-indexed [start; end] columns)."""
+    import scipy.io as sio
+    gt = sio.loadmat(os.path.join(AVENUE, "avenue.mat"))["gt"]
+    items = []
+    for d in sorted(glob.glob(os.path.join(AVENUE, "training", "frames", "*"))):
+        items.append({"name": f"train{os.path.basename(d)}", "frames_dir": d, "class": "AvenueNormal",
+                      "anomaly_frames": []})
+    for i, d in enumerate(sorted(glob.glob(os.path.join(AVENUE, "testing", "frames", "*")))):
+        iv = gt[0, i].astype(int)
+        items.append({"name": f"test{os.path.basename(d)}", "frames_dir": d, "class": "Avenue",
+                      "anomaly_frames": [[int(iv[0, k]) - 1, int(iv[1, k]) - 1] for k in range(iv.shape[1])]})
+    os.makedirs(E1_DIR, exist_ok=True)
+    path = os.path.join(E1_DIR, "playlist_avenue.json")
+    with open(path, "w") as f:
+        json.dump({"fps": 25.0, "items": items}, f, indent=1)
+    tot = sum(len(glob.glob(os.path.join(it["frames_dir"], "*.jpg"))) for it in items)
+    lab = sum(e - s + 1 for it in items for s, e in it["anomaly_frames"])
+    print(f"avenue playlist: {len(items)} clips, {tot} frames ({tot / 25 / 60:.1f} min @ 25 fps), "
+          f"{lab} labelled event frames -> {path}")
+    return path
+
+
 def run_one(tag: str, playlist: str, extra: list) -> str:
     cmd = [sys.executable, "-m", "janus.run", "--source", "playlist", "--source-path", playlist,
            "--fps", "30", "--tag", tag, "--runs-dir", E1_DIR] + extra
@@ -156,7 +183,7 @@ def summarize(d: dict) -> dict:
     }
 
 
-def plot(live: dict, frozen: dict, sl: dict, sf: dict, out: str) -> None:
+def plot(live: dict, frozen: dict, sl: dict, sf: dict, out: str, tag: str = "") -> None:
     import matplotlib
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
@@ -179,7 +206,8 @@ def plot(live: dict, frozen: dict, sl: dict, sf: dict, out: str) -> None:
     ax0.plot(tm, smooth(live["z"]), color=LIVE, lw=1.4, label="live (learning while serving)")
     ax0.set_ylabel("surprise (z-scored, 0.5 s smoothing)", color=INK)
     ax0.set_xlabel("stream time (min)   |   shaded = labelled event   |   vertical = camera cut", color=MUTED)
-    ax0.set_title(f"E1  Janus on real surveillance video (UCF-Crime)   "
+    src = "CUHK Avenue, one fixed camera" if tag == "avenue" else "UCF-Crime surveillance cameras"
+    ax0.set_title(f"E1  Janus on real video ({src})   "
                   f"novelty AUC live {sl['novelty_auc_raw']:.3f} vs frozen {sf['novelty_auc_raw']:.3f}   "
                   f"skill vs copy live {sl['skill']:+.3f} vs frozen {sf['skill']:+.3f}", color=INK, fontsize=11)
     ax0.legend(loc="upper right", frameon=False)
@@ -202,13 +230,14 @@ def plot(live: dict, frozen: dict, sl: dict, sf: dict, out: str) -> None:
     print(f"plot -> {out}")
 
 
-def analyze(live_dir: str, frozen_dir: str) -> None:
+def analyze(live_dir: str, frozen_dir: str, tag: str = "") -> None:
     L, F = load(live_dir), load(frozen_dir)
     sl, sf = summarize(L), summarize(F)
     out = {"live": sl, "frozen": sf, "live_dir": live_dir, "frozen_dir": frozen_dir,
            "warmup_s": WARMUP_S, "cut_exclude_s": CUT_EXCLUDE_S}
     os.makedirs(E1_DIR, exist_ok=True)
-    with open(os.path.join(E1_DIR, "e1_summary.json"), "w") as f:
+    sfx = f"_{tag}" if tag else ""
+    with open(os.path.join(E1_DIR, f"e1_summary{sfx}.json"), "w") as f:
         json.dump(out, f, indent=2)
     print(f"\n{'metric':<28}{'live':>12}{'frozen':>12}")
     for k in ("frames_scored", "fps", "steps", "final_weight_version", "skill", "skill_last_third",
@@ -225,7 +254,7 @@ def analyze(live_dir: str, frozen_dir: str) -> None:
     fv = {v["video"]: v for v in sf["per_video"]}
     for v in sl["per_video"]:
         print(f"  {v['video']:>3} {v['class']:<14} {v['skill']:+.3f} / {fv.get(v['video'], {}).get('skill', float('nan')):+.3f}")
-    plot(L, F, sl, sf, os.path.join(ROOT, "docs", "e1_real_video.png"))
+    plot(L, F, sl, sf, os.path.join(ROOT, "docs", f"e1_real_video{sfx}.png"), tag)
 
 
 def main() -> None:
@@ -233,19 +262,24 @@ def main() -> None:
     sub = p.add_subparsers(dest="cmd", required=True)
     b = sub.add_parser("build"); b.add_argument("--classes", default="Arson,Arrest,Assault,Abuse")
     b.add_argument("--normals", type=int, default=8); b.add_argument("--seed", type=int, default=0)
+    sub.add_parser("build-avenue")
     r = sub.add_parser("run"); r.add_argument("--playlist", default=os.path.join(E1_DIR, "playlist.json"))
+    r.add_argument("--tag", default="", help="suffix for run tags, e.g. 'avenue' -> live-avenue")
     r.add_argument("--duration", type=float, default=None)
-    an = sub.add_parser("analyze"); an.add_argument("live"); an.add_argument("frozen")
+    an = sub.add_parser("analyze"); an.add_argument("live"); an.add_argument("frozen"); an.add_argument("--tag", default="")
     a = p.parse_args()
     if a.cmd == "build":
         build(a)
+    elif a.cmd == "build-avenue":
+        build_avenue(a)
     elif a.cmd == "run":
         extra = ["--duration", str(a.duration)] if a.duration else []
-        live = run_one("live", a.playlist, extra)
-        frozen = run_one("frozen", a.playlist, extra + ["--frozen"])
-        analyze(live, frozen)
+        sfx = f"-{a.tag}" if a.tag else ""
+        live = run_one("live" + sfx, a.playlist, extra)
+        frozen = run_one("frozen" + sfx, a.playlist, extra + ["--frozen"])
+        analyze(live, frozen, a.tag)
     else:
-        analyze(a.live, a.frozen)
+        analyze(a.live, a.frozen, a.tag)
 
 
 if __name__ == "__main__":

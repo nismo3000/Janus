@@ -7,6 +7,7 @@ the stream. It also emits ground-truth regime ids and anomaly flags, which is
 what makes the novelty claim measurable instead of anecdotal.
 """
 
+import os
 import time
 from typing import Dict, Iterator, Tuple
 
@@ -300,21 +301,36 @@ def playlist_stream(cfg) -> Iterator[Frame]:
         plist = json.load(f)
     fps = float(plist.get("fps", cfg.fps))
     pacer = Pacer(fps)
+    t_fps = fps if fps > 0 else 30.0            # fps=0 means unpaced; cut_age still needs a clock
     for vi, item in enumerate(plist["items"]):
-        cap = cv2.VideoCapture(item["path"])
-        if not cap.isOpened():
-            raise RuntimeError(f"cannot open video: {item['path']}")
         ivals = [(int(s), int(e)) for s, e in item.get("anomaly_frames", []) if int(s) >= 0]
+        if "frames_dir" in item:                       # image sequence (Avenue-style)
+            import glob as _glob
+            paths = sorted(_glob.glob(os.path.join(item["frames_dir"], "*.jpg")))
+            if not paths:
+                raise RuntimeError(f"no frames in: {item['frames_dir']}")
+            reader = (cv2.imread(q) for q in paths)
+            cap = None
+        else:
+            cap = cv2.VideoCapture(item["path"])
+            if not cap.isOpened():
+                raise RuntimeError(f"cannot open video: {item['path']}")
+            reader = None
         j = 0
         while True:
-            ok, raw = cap.read()
+            if cap is not None:
+                ok, raw = cap.read()
+            else:
+                raw = next(reader, None)
+                ok = raw is not None
             if not ok:
                 break
             frame = cv2.resize(raw[:, :, ::-1], (cfg.res, cfg.res), interpolation=cv2.INTER_AREA)
             anom = int(any(s <= j <= e for s, e in ivals))
-            meta = {"regime": vi, "anomaly": anom, "cut_age": j / fps,
+            meta = {"regime": vi, "anomaly": anom, "cut_age": j / t_fps,
                     "src_frame": j, "video": item.get("name", str(vi))}
             yield np.ascontiguousarray(frame, dtype=np.uint8), meta
             j += 1
             pacer.wait()
-        cap.release()
+        if cap is not None:
+            cap.release()
