@@ -23,7 +23,7 @@ from .viewer import viewer_main
 
 def build_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="janus continuous video learner")
-    p.add_argument("--source", default="synthetic", choices=["synthetic", "camera", "x11", "file"])
+    p.add_argument("--source", default="synthetic", choices=["synthetic", "camera", "x11", "file", "playlist"])
     p.add_argument("--no-actions", action="store_true",
                    help="ablation: keep the action input but feed zeros (camera source only)")
     p.add_argument("--source-path", default="")

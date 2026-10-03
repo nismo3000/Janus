@@ -370,6 +370,9 @@ def inferencer_main(cfg, ring: FrameRing, bus: WeightBus, stop_event, run_dir: s
                         "swap": int(swapped is not None),
                         "ms": last_ms,
                     }
+                    for k in ("src_frame", "video", "cut_age"):   # real-video labels
+                        if k in meta:
+                            rec[k] = meta[k]
                     if dream_scored:
                         rec.update({"dream_step": dream.steps - 1, "dream_err": dream.err,
                                     "dream_copy": dream.copy_err})
@@ -401,6 +404,7 @@ def inferencer_main(cfg, ring: FrameRing, bus: WeightBus, stop_event, run_dir: s
                       f"weight_v={version}  swaps={swaps}", flush=True)
                 last_beat = now
 
+    stop_event.set()        # a finite stream (playlist) ended: release the learner too
     fetcher.stop()
     # Drop any predictions whose future never arrived, so the run ends clean.
     pending.clear()

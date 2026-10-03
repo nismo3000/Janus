@@ -8,8 +8,8 @@ import json
 @dataclass
 class Config:
     # --- stream ---
-    source: str = "synthetic"       # synthetic | camera | x11 | file
-    source_path: str = ""           # video path when source == "file"
+    source: str = "synthetic"       # synthetic | camera | x11 | file | playlist
+    source_path: str = ""           # video path (file) or labelled playlist JSON (playlist)
     fps: float = 30.0
     res: int = 96                   # frames are resized to res x res
 

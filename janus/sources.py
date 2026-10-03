@@ -273,4 +273,48 @@ def open_stream(cfg) -> Iterator[Frame]:
         return x11_stream(cfg)
     if cfg.source == "file":
         return file_stream(cfg)
+    if cfg.source == "playlist":
+        return playlist_stream(cfg)
     raise ValueError(f"unknown source: {cfg.source}")
+
+
+def playlist_stream(cfg) -> Iterator[Frame]:
+    """Real video with external labels, played once in order, no looping.
+
+    `cfg.source_path` is a JSON file: {"fps": 30, "items": [{"path": ..., "name": ...,
+    "anomaly_frames": [[start, end], ...]}, ...]}. Frame ranges are inclusive, in the
+    source video's own frame index, as UCF-Crime's temporal annotation gives them.
+
+    Playback is deterministic in frame order, so a live run and a frozen control see
+    the identical stream -- the same property the synthetic world had, which is what
+    lets a difference in the surprise trace be attributed to learning.
+
+    meta: regime = item index (each video is one fixed camera, i.e. one regime),
+    anomaly = 1 inside a labelled interval, cut_age = seconds since the last scene
+    cut (a cut is unpredictable by construction and is excluded from scoring by the
+    analysis, not by the model), src_frame = frame index inside the source video.
+    """
+    import json
+    import cv2
+    with open(cfg.source_path) as f:
+        plist = json.load(f)
+    fps = float(plist.get("fps", cfg.fps))
+    pacer = Pacer(fps)
+    for vi, item in enumerate(plist["items"]):
+        cap = cv2.VideoCapture(item["path"])
+        if not cap.isOpened():
+            raise RuntimeError(f"cannot open video: {item['path']}")
+        ivals = [(int(s), int(e)) for s, e in item.get("anomaly_frames", []) if int(s) >= 0]
+        j = 0
+        while True:
+            ok, raw = cap.read()
+            if not ok:
+                break
+            frame = cv2.resize(raw[:, :, ::-1], (cfg.res, cfg.res), interpolation=cv2.INTER_AREA)
+            anom = int(any(s <= j <= e for s, e in ivals))
+            meta = {"regime": vi, "anomaly": anom, "cut_age": j / fps,
+                    "src_frame": j, "video": item.get("name", str(vi))}
+            yield np.ascontiguousarray(frame, dtype=np.uint8), meta
+            j += 1
+            pacer.wait()
+        cap.release()

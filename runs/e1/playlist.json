@@ -1,0 +1,270 @@
+{
+ "fps": 30.0,
+ "items": [
+  {
+   "name": "Abuse028_x264.mp4",
+   "path": "/home/mdstr/janus/data/ucf_crime/part1/Anomaly-Videos-Part-1/Abuse/Abuse028_x264.mp4",
+   "class": "Abuse",
+   "anomaly_frames": [
+    [
+     165,
+     240
+    ]
+   ]
+  },
+  {
+   "name": "Abuse030_x264.mp4",
+   "path": "/home/mdstr/janus/data/ucf_crime/part1/Anomaly-Videos-Part-1/Abuse/Abuse030_x264.mp4",
+   "class": "Abuse",
+   "anomaly_frames": [
+    [
+     1275,
+     1360
+    ]
+   ]
+  },
+  {
+   "name": "Normal_Videos_901_x264.mp4",
+   "path": "/home/mdstr/janus/data/ucf_crime/normal_test/Testing_Normal_Videos_Anomaly/Normal_Videos_901_x264.mp4",
+   "class": "Normal",
+   "anomaly_frames": []
+  },
+  {
+   "name": "Arrest001_x264.mp4",
+   "path": "/home/mdstr/janus/data/ucf_crime/part1/Anomaly-Videos-Part-1/Arrest/Arrest001_x264.mp4",
+   "class": "Arrest",
+   "anomaly_frames": [
+    [
+     1185,
+     1485
+    ]
+   ]
+  },
+  {
+   "name": "Arrest007_x264.mp4",
+   "path": "/home/mdstr/janus/data/ucf_crime/part1/Anomaly-Videos-Part-1/Arrest/Arrest007_x264.mp4",
+   "class": "Arrest",
+   "anomaly_frames": [
+    [
+     1530,
+     2160
+    ]
+   ]
+  },
+  {
+   "name": "Normal_Videos_702_x264.mp4",
+   "path": "/home/mdstr/janus/data/ucf_crime/normal_test/Testing_Normal_Videos_Anomaly/Normal_Videos_702_x264.mp4",
+   "class": "Normal",
+   "anomaly_frames": []
+  },
+  {
+   "name": "Arrest024_x264.mp4",
+   "path": "/home/mdstr/janus/data/ucf_crime/part1/Anomaly-Videos-Part-1/Arrest/Arrest024_x264.mp4",
+   "class": "Arrest",
+   "anomaly_frames": [
+    [
+     1005,
+     3105
+    ]
+   ]
+  },
+  {
+   "name": "Arrest030_x264.mp4",
+   "path": "/home/mdstr/janus/data/ucf_crime/part1/Anomaly-Videos-Part-1/Arrest/Arrest030_x264.mp4",
+   "class": "Arrest",
+   "anomaly_frames": [
+    [
+     5535,
+     7200
+    ]
+   ]
+  },
+  {
+   "name": "Normal_Videos_224_x264.mp4",
+   "path": "/home/mdstr/janus/data/ucf_crime/normal_test/Testing_Normal_Videos_Anomaly/Normal_Videos_224_x264.mp4",
+   "class": "Normal",
+   "anomaly_frames": []
+  },
+  {
+   "name": "Arrest039_x264.mp4",
+   "path": "/home/mdstr/janus/data/ucf_crime/part1/Anomaly-Videos-Part-1/Arrest/Arrest039_x264.mp4",
+   "class": "Arrest",
+   "anomaly_frames": [
+    [
+     7215,
+     10335
+    ]
+   ]
+  },
+  {
+   "name": "Arson007_x264.mp4",
+   "path": "/home/mdstr/janus/data/ucf_crime/part1/Anomaly-Videos-Part-1/Arson/Arson007_x264.mp4",
+   "class": "Arson",
+   "anomaly_frames": [
+    [
+     2250,
+     5700
+    ]
+   ]
+  },
+  {
+   "name": "Normal_Videos_894_x264.mp4",
+   "path": "/home/mdstr/janus/data/ucf_crime/normal_test/Testing_Normal_Videos_Anomaly/Normal_Videos_894_x264.mp4",
+   "class": "Normal",
+   "anomaly_frames": []
+  },
+  {
+   "name": "Arson009_x264.mp4",
+   "path": "/home/mdstr/janus/data/ucf_crime/part1/Anomaly-Videos-Part-1/Arson/Arson009_x264.mp4",
+   "class": "Arson",
+   "anomaly_frames": [
+    [
+     220,
+     315
+    ]
+   ]
+  },
+  {
+   "name": "Arson010_x264.mp4",
+   "path": "/home/mdstr/janus/data/ucf_crime/part1/Anomaly-Videos-Part-1/Arson/Arson010_x264.mp4",
+   "class": "Arson",
+   "anomaly_frames": [
+    [
+     885,
+     1230
+    ]
+   ]
+  },
+  {
+   "name": "Normal_Videos_024_x264.mp4",
+   "path": "/home/mdstr/janus/data/ucf_crime/normal_test/Testing_Normal_Videos_Anomaly/Normal_Videos_024_x264.mp4",
+   "class": "Normal",
+   "anomaly_frames": []
+  },
+  {
+   "name": "Arson011_x264.mp4",
+   "path": "/home/mdstr/janus/data/ucf_crime/part1/Anomaly-Videos-Part-1/Arson/Arson011_x264.mp4",
+   "class": "Arson",
+   "anomaly_frames": [
+    [
+     150,
+     420
+    ],
+    [
+     680,
+     1267
+    ]
+   ]
+  },
+  {
+   "name": "Arson016_x264.mp4",
+   "path": "/home/mdstr/janus/data/ucf_crime/part1/Anomaly-Videos-Part-1/Arson/Arson016_x264.mp4",
+   "class": "Arson",
+   "anomaly_frames": [
+    [
+     1000,
+     1796
+    ]
+   ]
+  },
+  {
+   "name": "Normal_Videos_887_x264.mp4",
+   "path": "/home/mdstr/janus/data/ucf_crime/normal_test/Testing_Normal_Videos_Anomaly/Normal_Videos_887_x264.mp4",
+   "class": "Normal",
+   "anomaly_frames": []
+  },
+  {
+   "name": "Arson018_x264.mp4",
+   "path": "/home/mdstr/janus/data/ucf_crime/part1/Anomaly-Videos-Part-1/Arson/Arson018_x264.mp4",
+   "class": "Arson",
+   "anomaly_frames": [
+    [
+     270,
+     600
+    ]
+   ]
+  },
+  {
+   "name": "Arson022_x264.mp4",
+   "path": "/home/mdstr/janus/data/ucf_crime/part1/Anomaly-Videos-Part-1/Arson/Arson022_x264.mp4",
+   "class": "Arson",
+   "anomaly_frames": [
+    [
+     3500,
+     4000
+    ]
+   ]
+  },
+  {
+   "name": "Normal_Videos_312_x264.mp4",
+   "path": "/home/mdstr/janus/data/ucf_crime/normal_test/Testing_Normal_Videos_Anomaly/Normal_Videos_312_x264.mp4",
+   "class": "Normal",
+   "anomaly_frames": []
+  },
+  {
+   "name": "Arson035_x264.mp4",
+   "path": "/home/mdstr/janus/data/ucf_crime/part1/Anomaly-Videos-Part-1/Arson/Arson035_x264.mp4",
+   "class": "Arson",
+   "anomaly_frames": [
+    [
+     600,
+     900
+    ]
+   ]
+  },
+  {
+   "name": "Arson041_x264.mp4",
+   "path": "/home/mdstr/janus/data/ucf_crime/part1/Anomaly-Videos-Part-1/Arson/Arson041_x264.mp4",
+   "class": "Arson",
+   "anomaly_frames": [
+    [
+     2130,
+     3615
+    ]
+   ]
+  },
+  {
+   "name": "Normal_Videos_873_x264.mp4",
+   "path": "/home/mdstr/janus/data/ucf_crime/normal_test/Testing_Normal_Videos_Anomaly/Normal_Videos_873_x264.mp4",
+   "class": "Normal",
+   "anomaly_frames": []
+  },
+  {
+   "name": "Assault006_x264.mp4",
+   "path": "/home/mdstr/janus/data/ucf_crime/part1/Anomaly-Videos-Part-1/Assault/Assault006_x264.mp4",
+   "class": "Assault",
+   "anomaly_frames": [
+    [
+     1185,
+     8096
+    ]
+   ]
+  },
+  {
+   "name": "Assault010_x264.mp4",
+   "path": "/home/mdstr/janus/data/ucf_crime/part1/Anomaly-Videos-Part-1/Assault/Assault010_x264.mp4",
+   "class": "Assault",
+   "anomaly_frames": [
+    [
+     11330,
+     11680
+    ],
+    [
+     12260,
+     12930
+    ]
+   ]
+  },
+  {
+   "name": "Assault011_x264.mp4",
+   "path": "/home/mdstr/janus/data/ucf_crime/part1/Anomaly-Videos-Part-1/Assault/Assault011_x264.mp4",
+   "class": "Assault",
+   "anomaly_frames": [
+    [
+     375,
+     960
+    ]
+   ]
+  }
+ ]
+}

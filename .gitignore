@@ -8,3 +8,6 @@ runs/
 *.pt
 *.jsonl
 docs/*.mp4
+
+# real-video datasets (UCF-Crime etc.): large, re-downloadable
+data/
