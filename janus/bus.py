@@ -258,3 +258,78 @@ class DisplayBus:
             c = self.cmd.value
             self.cmd.value = 0
             return c
+
+
+class DeviceWeightBus:
+    """Single-pool weight bus (E2): the slots live on the GPU both processes share.
+
+    torch.multiprocessing (spawn) hands the child processes CUDA IPC handles to the
+    same device memory, so the learner's publish is one device-side cat plus a D2D
+    copy, and the inferencer's swap is a pointer rebind. Nothing crosses host memory
+    and no fetcher thread exists. This is the design rule "double-buffer the weights
+    in one memory pool" -- the same shape as unified memory on Jetson/Spark.
+
+    Three slots, not two: the writer must never touch the slot the reader is bound to
+    (version c) nor one the reader might still have kernels in flight on. The reader
+    publishes `consumed` = the version it is bound to *after* its stream has drained;
+    the writer only overwrites the slot of version v-2 (== slot of v+1) once
+    consumed >= v-1. If the reader is behind, the publish is skipped, never raced.
+    """
+
+    SLOTS = 3
+
+    def __init__(self, numel: int, device):
+        self.numel = numel
+        self.device = torch.device(device)
+        self.slots = torch.zeros((self.SLOTS, numel), dtype=torch.float32, device=self.device)
+        self.version = mp.Value("q", 0)
+        self.consumed = mp.Value("q", 0)
+        self.skipped = mp.Value("q", 0)            # publishes refused because the reader was behind
+
+    def slot(self, v: int) -> torch.Tensor:
+        return self.slots[v % self.SLOTS]
+
+    # -- writer side -------------------------------------------------------
+    def publish(self, model: nn.Module) -> Optional[int]:
+        with self.version.get_lock():
+            v = self.version.value
+        with self.consumed.get_lock():
+            c = self.consumed.value
+        if v >= 2 and c < v - 1:
+            with self.skipped.get_lock():
+                self.skipped.value += 1
+            return None
+        sd = model.state_dict()
+        flat = torch.cat([sd[k].detach().reshape(-1).float() for k in float_state_keys(model)])
+        self.slot(v + 1).copy_(flat.to(self.device, non_blocking=False))
+        torch.cuda.current_stream(self.device).synchronize()   # landed before it is advertised
+        with self.version.get_lock():
+            self.version.value = v + 1
+        return v + 1
+
+    # -- reader side -------------------------------------------------------
+    def current_version(self) -> int:
+        with self.version.get_lock():
+            return self.version.value
+
+    def mark_consumed(self, v: int) -> None:
+        with self.consumed.get_lock():
+            self.consumed.value = max(self.consumed.value, v)
+
+    def pull(self, model: nn.Module, since: int) -> Optional[int]:
+        """Copy (not bind) the latest slot into `model`'s own tensors; used by the learner,
+        which trains its private copy, and once by the inferencer before it binds."""
+        with self.version.get_lock():
+            v = self.version.value
+        if v <= since:
+            return None
+        flat = self.slot(v)
+        sd = model.state_dict()
+        off = 0
+        with torch.no_grad():
+            for k in float_state_keys(model):
+                t = sd[k]
+                n = t.numel()
+                t.copy_(flat[off:off + n].view_as(t).to(t.dtype))
+                off += n
+        return v
