@@ -61,6 +61,11 @@ def learner_main(cfg, ring: FrameRing, bus: WeightBus, stop_event, run_dir: str)
 
     world_params = list(model.encoder.parameters()) + list(model.predictor.parameters())
     opt = torch.optim.AdamW(world_params, lr=cfg.lr, weight_decay=cfg.weight_decay)
+    cbp = None
+    if getattr(cfg, "cbp", False):
+        from .cbp import ContinualBackprop
+        cbp = ContinualBackprop(model.predictor, opt, cfg.cbp_rate, cfg.cbp_maturity,
+                                cfg.cbp_decay, cfg.seed)
     # The probe decoder gets its own optimizer and its own clip so it cannot change the
     # world model's step in any way -- not even through a shared gradient norm.
     opt_dec = torch.optim.AdamW(model.decoder.parameters(), lr=cfg.lr, weight_decay=cfg.weight_decay)
@@ -157,6 +162,8 @@ def learner_main(cfg, ring: FrameRing, bus: WeightBus, stop_event, run_dir: str)
         torch.nn.utils.clip_grad_norm_(model.decoder.parameters(), cfg.grad_clip)
         opt.step()
         opt_dec.step()
+        if cbp is not None:
+            cbp.step()
         model.update_target()
         step += 1
 
@@ -189,6 +196,7 @@ def learner_main(cfg, ring: FrameRing, bus: WeightBus, stop_event, run_dir: str)
                 "reservoir": reservoir.n_filled,
                 "ring": hi - lo,
                 "version": bus.current_version(),
+                "cbp_replaced": cbp.replaced if cbp is not None else 0,
             }) + "\n")
             last_log, steps_at_last_log = now, step
 

@@ -43,6 +43,12 @@ class Config:
     augment: bool = True            # clip-consistent crop/flip/jitter; off => memorizes the ring
     steps_per_frame: float = 3.0    # replay-ratio throttle: gradient steps per frame observed
 
+    # --- continual backprop baseline (E3) ---
+    cbp: bool = False               # reset low-utility predictor units at a fixed rate
+    cbp_rate: float = 1e-4          # replacement rate per unit per step (Dohare et al. default)
+    cbp_maturity: int = 100         # steps a unit must live before it can be reset
+    cbp_decay: float = 0.99         # utility running-mean decay
+
     # --- replay ---
     ring_frames: int = 2048         # shared recent-frame ring written by the inferencer
     reservoir_size: int = 4096      # long-horizon uniform sample of the whole session
