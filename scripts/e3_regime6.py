@@ -119,7 +119,7 @@ def plot(sums: list, out: str) -> None:
             ax0.scatter(*zip(*newp), color=COLORS[i], s=42, zorder=5, edgecolor="white", linewidth=1.2)
     ax0.set_xlabel("stream time (min)   |   shaded = regime 6 on screen   |   dashed = regime 6 first appears", color=MUTED)
     ax0.set_ylabel("skill vs copy baseline, per 45 s block", color=INK)
-    ax0.set_title("E3  a sixth regime arrives after the model saturated on five", color=INK, fontsize=11)
+    ax0.set_title("E3  regimes 1-5 cycle for 10.5 min, then a sixth joins the cycle", color=INK, fontsize=11)
     ax0.legend(frameon=False)
     for sp in ("top", "right"):
         ax0.spines[sp].set_visible(False)

@@ -76,3 +76,29 @@ should be stated as such in the write-up.
 (resets are blind to which regime a unit served). `growdecay` is the claim: parity on regime 5
 within one or two appearances **and** retention delta ≈ 0, because the new regime got its own
 capacity and nothing serving 0–4 was touched.
+
+## Interim result, 2026-10-03: full-size v0 is not capacity-bound on this stream
+
+Fixed vs continual backprop, 1800 s, seed 0, one time-sliced GPU (`e3_regime6.png`,
+`../runs/e3/e3_summary.json`):
+
+| | fixed | cbp |
+|---|---:|---:|
+| learner steps | 145,649 | 142,702 |
+| units reset by CBP | 0 | 29,204 |
+| regime-6 skill by appearance | +0.29 +0.62 +0.70 +0.75 +0.79 | +0.29 +0.63 +0.70 +0.75 +0.78 |
+| time to parity (appearances) | 2 | 2 |
+| retention on regimes 1–5 after 6 arrived | **+0.11** | +0.10 |
+| probe error on early clips, final | 0.394 | 0.361 |
+
+Two things follow. (1) **Nothing is being forgotten.** Skill on every old regime keeps rising
+through the whole run, so the model has spare capacity for six toy regimes and the regime-6 test
+cannot show what grow/decay buys. (2) **CBP is indistinguishable from fixed** here: 29k resets
+neither helped nor hurt, which is what you expect when no unit is saturated. The baseline runs
+were still worth having: they validate the harness and the schedule, and they put a ceiling on
+the stream's difficulty.
+
+Next: the same pair at reduced capacity (`fixed-small`, `cbp-small`: encoder width 16, predictor
+hidden 256, ~1/5 the parameters), queued 2026-10-03 11:53. If the small fixed model forgets
+(retention < 0) the E3 stream is settled; if not, the stream needs more regimes or longer blocks,
+which is a protocol change to bring to Mike with the grow/decay decisions.
