@@ -31,6 +31,8 @@ def build_args() -> argparse.Namespace:
     p.add_argument("--fps", type=float, default=30.0)
     p.add_argument("--res", type=int, default=96)
     p.add_argument("--batch", type=int, default=64)
+    p.add_argument("--width", type=int, default=32, help="encoder base channels (capacity knob)")
+    p.add_argument("--hidden", type=int, default=1024, help="predictor hidden width (capacity knob)")
     p.add_argument("--lr", type=float, default=3e-4)
     p.add_argument("--horizon", type=int, default=15)
     p.add_argument("--seed", type=int, default=0)
@@ -65,7 +67,7 @@ def config_from_args(a: argparse.Namespace) -> Config:
     action_dim = 3 if a.source == "camera" else 0
     return Config(
         source=a.source, source_path=a.source_path, fps=a.fps, res=a.res,
-        horizon_frames=a.horizon, dim=256, batch=a.batch, lr=a.lr,
+        horizon_frames=a.horizon, dim=256, width=a.width, hidden=a.hidden, batch=a.batch, lr=a.lr,
         device_infer=d_infer, device_learn=d_learn,
         action_dim=action_dim, use_actions=not a.no_actions,
         frozen=a.frozen, no_replay=a.no_replay, duration_s=a.duration,

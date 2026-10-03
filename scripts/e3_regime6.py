@@ -37,6 +37,11 @@ NEW = 5
 CONFIGS = {
     "fixed": [],
     "cbp": ["--cbp"],
+    # Capacity-bound variants: v0 at full size is NOT saturated by six toy regimes (fixed run
+    # 2026-10-03: retention +0.11, parity in 2 appearances), so the test is run on a model small
+    # enough that the fixed baseline actually forgets.
+    "fixed-small": ["--width", "16", "--hidden", "256"],
+    "cbp-small": ["--cbp", "--width", "16", "--hidden", "256"],
 }
 
 
@@ -132,10 +137,11 @@ def plot(sums: list, out: str) -> None:
     fig.tight_layout(); fig.savefig(out, dpi=130); print(f"plot -> {out}")
 
 
-def analyze(named: list) -> None:
+def analyze(named: list, tag: str = "") -> None:
     sums = [summarize(n, d) for n, d in named]
     os.makedirs(E3_DIR, exist_ok=True)
-    with open(os.path.join(E3_DIR, "e3_summary.json"), "w") as f:
+    sfx = f"_{tag}" if tag else ""
+    with open(os.path.join(E3_DIR, f"e3_summary{sfx}.json"), "w") as f:
         json.dump(sums, f, indent=2)
     print(f"\n{'metric':<30}" + "".join(f"{s['name']:>14}" for s in sums))
     for k in ("steps", "cbp_replaced", "parity_skill_pre", "new_skill_final", "time_to_parity_appearances",
@@ -148,7 +154,7 @@ def analyze(named: list) -> None:
     print("\nold-regime skill, last pre-6 cycle -> last cycle:")
     for s in sums:
         print(f"  {s['name']:<8}", " ".join(f"r{r}:{s['old_skill_pre'][r]:+.2f}->{s['old_skill_last_cycle'][r]:+.2f}" for r in range(N_BASE)))
-    plot(sums, os.path.join(ROOT, "docs", "e3_regime6.png"))
+    plot(sums, os.path.join(ROOT, "docs", f"e3_regime6{sfx}.png"))
 
 
 def main() -> None:
@@ -156,14 +162,15 @@ def main() -> None:
     sub = p.add_subparsers(dest="cmd", required=True)
     r = sub.add_parser("run"); r.add_argument("--duration", type=float, default=1800.0)
     r.add_argument("--seed", type=int, default=0); r.add_argument("--configs", default="fixed,cbp")
-    an = sub.add_parser("analyze"); an.add_argument("pairs", nargs="+", help="name=run_dir")
+    r.add_argument("--summary-tag", default="", help="suffix for e3_summary/plot file names")
+    an = sub.add_parser("analyze"); an.add_argument("pairs", nargs="+", help="name=run_dir"); an.add_argument("--summary-tag", default="")
     a = p.parse_args()
     if a.cmd == "run":
         os.makedirs(E3_DIR, exist_ok=True)
         named = [(c, run_one(f"e3-{c}", a.duration, CONFIGS[c], a.seed)) for c in a.configs.split(",")]
-        analyze(named)
+        analyze(named, a.summary_tag)
     else:
-        analyze([tuple(x.split("=", 1)) for x in a.pairs])
+        analyze([tuple(x.split("=", 1)) for x in a.pairs], a.summary_tag)
 
 
 if __name__ == "__main__":
