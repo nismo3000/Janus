@@ -15,7 +15,8 @@ import numpy as np
 
 Frame = Tuple[np.ndarray, Dict]
 
-N_REGIMES = 5
+N_REGIMES = 5                 # regimes always present
+N_REGIMES_MAX = 6             # regime 5 (the sixth) is the late arrival for the grow/decay test
 
 
 class Pacer:
@@ -45,10 +46,16 @@ class SyntheticWorld:
     """Procedural video with scheduled regime changes and injected anomalies."""
 
     def __init__(self, res: int, fps: float, seed: int, regime_seconds: float,
-                 anomaly_every_s: float, anomaly_len_s: float):
+                 anomaly_every_s: float, anomaly_len_s: float,
+                 n_regimes: int = N_REGIMES, late_regime_after_s: float = -1.0):
         self.res = res
         self.fps = fps
         self.regime_seconds = regime_seconds
+        # E3 schedule: cycle the first `n_regimes` blocks; once t >= late_regime_after_s the
+        # sixth regime joins the cycle (regimes 0-4 keep recurring so retention is measured
+        # in-stream, not just by probe). late_regime_after_s < 0 = never.
+        self.n_regimes = n_regimes
+        self.late_after = late_regime_after_s
         self.anomaly_every_s = anomaly_every_s
         self.anomaly_len_s = anomaly_len_s
         self.x, self.y = _grid(res)
@@ -60,6 +67,19 @@ class SyntheticWorld:
         self.swarm_ph = rng.uniform(0, 6.28, size=(10, 2)).astype(np.float32)
         self.bar_k = float(rng.uniform(4, 9))
         self.anom_rng = np.random.RandomState(seed + 991)
+
+    def regime_at(self, t: float) -> int:
+        block = int(t // self.regime_seconds)
+        if self.late_after < 0 or t < self.late_after:
+            return block % self.n_regimes
+        # After the late arrival the cycle has n_regimes + 1 members. The new regime
+        # takes the first full block at or after late_after, then 0..n-1 follow, so
+        # every old regime keeps recurring and retention is measured in-stream.
+        b0 = int(np.ceil(self.late_after / self.regime_seconds))
+        if block < b0:
+            return block % self.n_regimes
+        r = (block - b0) % (self.n_regimes + 1)
+        return self.n_regimes if r == 0 else r - 1
 
     @staticmethod
     def _bounce(p: np.ndarray) -> np.ndarray:
@@ -77,7 +97,7 @@ class SyntheticWorld:
 
     def render(self, idx: int) -> Frame:
         t = idx / self.fps
-        regime = int(t // self.regime_seconds) % N_REGIMES
+        regime = self.regime_at(t)
 
         if regime == 0:                                        # bouncing blobs
             p = self._bounce(self.ball_p0 + self.ball_v * t)
@@ -99,10 +119,21 @@ class SyntheticWorld:
             p = np.stack([cx, cy], axis=-1)
             cols = np.tile(np.array([[.9, .9, .2]], dtype=np.float32), (10, 1))
             img = self._blobs(p, np.full(10, 0.05, dtype=np.float32), cols)
-        else:                                                  # expanding rings
+        elif regime == 4:                                      # expanding rings
             d = np.sqrt((self.x - 0.5) ** 2 + (self.y - 0.5) ** 2)
             g = 0.5 + 0.5 * np.sin(2 * np.pi * (10.0 * d - 1.2 * t))
             img = np.stack([g * 0.3, g, g * 0.8], axis=-1).astype(np.float32)
+        else:                                                  # regime 5: drifting lattice
+            # A sheared square lattice of soft dots translating diagonally while its
+            # hue cycles -- unlike anything in regimes 0-4 (no bouncing, no radial
+            # structure, no bars), so a model saturated on 0-4 has genuinely new
+            # dynamics to learn.
+            u = self.x + 0.5 * self.y + 0.25 * t
+            v = self.y - 0.15 * t
+            g = (0.5 + 0.5 * np.cos(2 * np.pi * 5.0 * u)) * (0.5 + 0.5 * np.cos(2 * np.pi * 5.0 * v))
+            g = g ** 3
+            h = 0.5 + 0.5 * np.sin(0.7 * t)
+            img = np.stack([g * h, g * (1 - h), g * 0.6 + 0.2 * (1 - g)], axis=-1).astype(np.float32)
 
         is_anom = 0
         if self.anomaly_every_s > 0:
@@ -121,7 +152,8 @@ class SyntheticWorld:
 
 def synthetic_stream(cfg) -> Iterator[Frame]:
     world = SyntheticWorld(cfg.res, cfg.fps, cfg.seed, cfg.regime_seconds,
-                           cfg.anomaly_every_s, cfg.anomaly_len_s)
+                           cfg.anomaly_every_s, cfg.anomaly_len_s,
+                           getattr(cfg, "n_regimes", N_REGIMES), getattr(cfg, "late_regime_after_s", -1.0))
     pacer = Pacer(cfg.fps)
     i = 0
     while True:

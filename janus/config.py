@@ -77,6 +77,8 @@ class Config:
 
     # --- synthetic source schedule (ground truth for validation) ---
     regime_seconds: float = 45.0    # rotate the generative regime this often
+    n_regimes: int = 5              # regimes in the base cycle (max 5 + the late one)
+    late_regime_after_s: float = -1.0   # E3: the sixth regime joins the cycle at this time; <0 never
     anomaly_every_s: float = 17.0   # inject a brief out-of-regime event
     anomaly_len_s: float = 0.6
 
