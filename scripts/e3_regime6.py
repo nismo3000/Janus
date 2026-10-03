@@ -137,17 +137,22 @@ def plot(sums: list, out: str) -> None:
             ax0.scatter(*zip(*newp), color=COLORS[i], s=42, zorder=5, edgecolor="white", linewidth=1.2)
     ax0.set_xlabel("stream time (min)   |   shaded = regime 6 on screen   |   dashed = regime 6 first appears", color=MUTED)
     ax0.set_ylabel("skill vs copy baseline, per 45 s block", color=INK)
-    ax0.set_title("E3  regimes 1-5 cycle for 10.5 min, then a sixth joins the cycle", color=INK, fontsize=11)
+    regs = [x["regime"] for x in sums[0]["blocks"]]
+    solo = any(regs[i] == NEW and regs[i + 1] == NEW for i in range(len(regs) - 1))
+    ax0.set_title("E3  regimes 1-5 cycle for 10.5 min, then regime 6 alone for 9 min, then 1-5 return" if solo
+                  else "E3  regimes 1-5 cycle for 10.5 min, then a sixth joins the cycle", color=INK, fontsize=11)
     ax0.legend(frameon=False)
     for sp in ("top", "right"):
         ax0.spines[sp].set_visible(False)
     x = np.arange(len(sums)); w = 0.38
     ax1.bar(x - w / 2, [s["new_skill_final"] for s in sums], w, color=[COLORS[i] for i in range(len(sums))], label="regime 6, final appearance")
-    ax1.bar(x + w / 2, [s["retention_delta"] for s in sums], w, color=[COLORS[i] for i in range(len(sums))], alpha=0.45, label="regimes 1-5, change after 6 arrived")
+    rk = "forget_on_return_mean" if solo else "retention_delta"
+    rl = "regimes 1-5: first 10 s back minus pre-6 skill" if solo else "regimes 1-5, change after 6 arrived"
+    ax1.bar(x + w / 2, [s[rk] for s in sums], w, color=[COLORS[i] for i in range(len(sums))], alpha=0.45, label=rl)
     ax1.axhline(0, color=MUTED, lw=0.8)
     for i, s in enumerate(sums):
         ax1.text(i - w / 2, s["new_skill_final"], f"{s['new_skill_final']:+.2f}", ha="center", va="bottom", fontsize=8, color=INK)
-        ax1.text(i + w / 2, s["retention_delta"], f"{s['retention_delta']:+.2f}", ha="center", va="bottom" if s["retention_delta"] >= 0 else "top", fontsize=8, color=INK)
+        ax1.text(i + w / 2, s[rk], f"{s[rk]:+.2f}", ha="center", va="bottom" if s[rk] >= 0 else "top", fontsize=8, color=INK)
     ax1.set_xticks(x); ax1.set_xticklabels([f"{s['name']}\nparity in {s['time_to_parity_appearances']} app." for s in sums], fontsize=9)
     ax1.set_ylabel("skill", color=INK); ax1.legend(frameon=False, fontsize=8)
     for sp in ("top", "right"):
