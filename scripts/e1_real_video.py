@@ -152,10 +152,21 @@ def summarize(d: dict) -> dict:
         per_class[k]["s"].append(s[m]); per_class[k]["a"].append(anom[m]); per_class[k]["z"].append(z[m])
     class_auc = {}
     for k, v in per_class.items():
-        ss, aa, zz = np.concatenate(v["s"]), np.concatenate(v["a"]), np.concatenate(v["z"])
-        if aa.sum() > 0 and (aa == 0).sum() > 0:
-            class_auc[k] = {"auc_raw": auc(ss, aa), "auc_z": auc(zz, aa),
-                            "n_anom": int(aa.sum()), "n_norm": int((aa == 0).sum())}
+        aucs_r = [auc(ss, aa) for ss, aa in zip(v["s"], v["a"]) if aa.sum() > 0 and (aa == 0).sum() > 0]
+        aucs_z = [auc(zz, aa) for zz, aa in zip(v["z"], v["a"]) if aa.sum() > 0 and (aa == 0).sum() > 0]
+        aa_all = np.concatenate(v["a"])
+        if aucs_r:
+            class_auc[k] = {"auc_raw": float(np.mean(aucs_r)), "auc_z": float(np.mean(aucs_z)),
+                            "n_videos": len(aucs_r),
+                            "n_anom": int(aa_all.sum()), "n_norm": int((aa_all == 0).sum())}
+    # Macro AUC: mean of per-video AUCs. Pooled ("micro") AUC across cameras is confounded by
+    # each camera's own baseline surprise level; the served signal is the z-score precisely
+    # because of that, so the z-scored micro AUC and the raw macro AUC are the honest numbers.
+    vid_auc_raw, vid_auc_z = [], []
+    for r in np.unique(reg):
+        m = clean & (reg == r)
+        if m.sum() >= 50 and anom[m].sum() > 0 and (anom[m] == 0).sum() > 0:
+            vid_auc_raw.append(auc(s[m], anom[m])); vid_auc_z.append(auc(z[m], anom[m]))
     per_video = []
     for r in np.unique(reg):
         m = clean & (reg == r) & (anom == 0)
@@ -173,6 +184,9 @@ def summarize(d: dict) -> dict:
         "copy_normal": float(c[norm].mean()),
         "novelty_auc_raw": auc(s[clean], anom[clean]), "novelty_auc_z": auc(z[clean], anom[clean]),
         "novelty_auc_raw_incl_cuts": auc(s[ok], anom[ok]),
+        "novelty_auc_macro_raw": float(np.mean(vid_auc_raw)) if vid_auc_raw else float("nan"),
+        "novelty_auc_macro_z": float(np.mean(vid_auc_z)) if vid_auc_z else float("nan"),
+        "n_videos_with_events": len(vid_auc_raw),
         "cut_frames_excluded": int((ok & ~clean).sum()),
         "class_auc": class_auc, "per_video": per_video,
         "steps": int(lrn[-1]["step"]) if lrn else 0,
@@ -208,7 +222,7 @@ def plot(live: dict, frozen: dict, sl: dict, sf: dict, out: str, tag: str = "") 
     ax0.set_xlabel("stream time (min)   |   shaded = labelled event   |   vertical = camera cut", color=MUTED)
     src = "CUHK Avenue, one fixed camera" if tag == "avenue" else "UCF-Crime surveillance cameras"
     ax0.set_title(f"E1  Janus on real video ({src})   "
-                  f"novelty AUC live {sl['novelty_auc_raw']:.3f} vs frozen {sf['novelty_auc_raw']:.3f}   "
+                  f"novelty AUC (per-video mean) live {sl['novelty_auc_macro_raw']:.3f} vs frozen {sf['novelty_auc_macro_raw']:.3f}   "
                   f"skill vs copy live {sl['skill']:+.3f} vs frozen {sf['skill']:+.3f}", color=INK, fontsize=11)
     ax0.legend(loc="upper right", frameon=False)
     for sp in ("top", "right"):
@@ -221,7 +235,7 @@ def plot(live: dict, frozen: dict, sl: dict, sf: dict, out: str, tag: str = "") 
     ax1.bar(x + w / 2, [sf["class_auc"].get(k, {}).get("auc_raw", np.nan) for k in ks], w, color=FROZ, label="frozen")
     ax1.axhline(0.5, color=CUT, lw=1)
     ax1.set_xticks(x); ax1.set_xticklabels([f"{k}\n(n={sl['class_auc'].get(k, {}).get('n_anom', 0)} evt frames)" for k in ks], fontsize=9)
-    ax1.set_ylim(0, 1); ax1.set_ylabel("novelty AUC by class", color=INK)
+    ax1.set_ylim(0, 1); ax1.set_ylabel("novelty AUC by class (mean over videos)", color=INK)
     ax1.legend(loc="upper right", frameon=False, ncol=2)
     for sp in ("top", "right"):
         ax1.spines[sp].set_visible(False)
@@ -242,7 +256,8 @@ def analyze(live_dir: str, frozen_dir: str, tag: str = "") -> None:
     print(f"\n{'metric':<28}{'live':>12}{'frozen':>12}")
     for k in ("frames_scored", "fps", "steps", "final_weight_version", "skill", "skill_last_third",
               "surprise_normal", "surprise_anomaly", "copy_normal", "novelty_auc_raw", "novelty_auc_z",
-              "novelty_auc_raw_incl_cuts", "cut_frames_excluded", "erank_min", "infer_ms_p50", "infer_ms_p99"):
+              "novelty_auc_raw_incl_cuts", "novelty_auc_macro_raw", "novelty_auc_macro_z",
+              "n_videos_with_events", "cut_frames_excluded", "erank_min", "infer_ms_p50", "infer_ms_p99"):
         f = lambda v: f"{v:.4f}" if isinstance(v, float) else str(v)
         print(f"{k:<28}{f(sl[k]):>12}{f(sf[k]):>12}")
     print("\nper-class novelty AUC (raw surprise):")
