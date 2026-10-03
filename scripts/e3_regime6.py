@@ -46,6 +46,7 @@ CONFIGS = {
     # regimes return once. Their first EARLY_S seconds back are the forgetting measurement.
     "fixed-solo": ["--late-mode", "solo"],
     "cbp-solo": ["--cbp", "--late-mode", "solo"],
+    "noreplay-solo": ["--no-replay", "--late-mode", "solo"],   # what the reservoir buys on this schedule
 }
 EARLY_S = 10.0
 
