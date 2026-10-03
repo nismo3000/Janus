@@ -1,23 +1,22 @@
 """E1: the first measurement of Janus on real video.
 
-Stream = UCF-Crime test videos (CC0, fixed surveillance cameras, 320x240 @ 30 fps)
-played in order at native rate with the dataset's temporal anomaly annotation as
-ground truth. Same protocol as the synthetic validation: a live run and a frozen
-control see the identical stream; skill is reported against the copy baseline
-("the future looks like now"); novelty AUC is surprise vs. the frame-level label.
+Stream = CUHK Avenue: one fixed camera over a campus walkway, 640x360 @ 25 fps, played
+as JPEG frame sequences in order (16 normal training clips, then the 21 test clips whose
+frame-level event labels -- running, loitering, thrown objects -- come from avenue.mat).
+Same protocol as the synthetic validation: a live run and a frozen control see the identical
+stream; skill is reported against the copy baseline ("the future looks like now"); novelty
+AUC is surprise vs. the frame-level label.
 
 What is different from synthetic, and handled here rather than in the model:
-  * each video is one camera -> one "regime"; the boundary between videos is a
-    hard cut, unpredictable by construction, so frames within CUT_EXCLUDE_S of a
-    cut are excluded from skill and AUC (reported separately, including them);
-  * anomalies are real: some (fire, explosion) are visually gross, others
-    (shoplifting, abuse) are semantic and invisible to a 96x96 pixel model.
-    AUC is therefore reported per class as well as pooled.
+  * the boundary between clips is a hard cut, unpredictable by construction, so frames within
+    CUT_EXCLUDE_S of a cut are excluded from skill and AUC (reported separately, including them);
+  * events are real and sometimes subtle at 96x96; AUC is reported pooled (micro) and as the
+    mean over clips (macro), on raw surprise and on the served z-score.
 
 Usage:
-    python scripts/e1_real_video.py build  --classes Arson,Arrest,Assault,Abuse --normals 8
-    python scripts/e1_real_video.py run    [--playlist runs/e1/playlist.json]
-    python scripts/e1_real_video.py analyze runs/<live> runs/<frozen>
+    python scripts/e1_real_video.py build
+    python scripts/e1_real_video.py run
+    python scripts/e1_real_video.py analyze runs/e1/<live> runs/e1/<frozen>
 """
 
 import argparse
@@ -34,64 +33,15 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 from scripts.validate import auc, load_jsonl, _skill   # noqa: E402
 
-DATA = os.path.join(ROOT, "data", "ucf_crime")
-ANNOT = os.path.join(DATA, "Temporal_Anomaly_Annotation_for_Testing_Videos.txt")
 E1_DIR = os.path.join(ROOT, "runs", "e1")
 WARMUP_S = 30.0
 CUT_EXCLUDE_S = 2.0
 
 
-def read_annotation() -> dict:
-    out = {}
-    with open(ANNOT) as f:
-        for line in f:
-            p = line.split()
-            if len(p) < 6:
-                continue
-            name, cls = p[0], p[1]
-            ivals = [[int(p[2]), int(p[3])], [int(p[4]), int(p[5])]]
-            out[name] = {"class": cls, "anomaly_frames": [iv for iv in ivals if iv[0] >= 0]}
-    return out
-
-
-def build(a) -> str:
-    ann = read_annotation()
-    files = {os.path.basename(p): p for p in glob.glob(os.path.join(DATA, "**", "*.mp4"), recursive=True)
-             if "test_smoke" not in p}
-    classes = [c for c in a.classes.split(",") if c]
-    rng = np.random.RandomState(a.seed)
-    anoms = sorted(n for n, m in ann.items() if n in files and m["class"] in classes)
-    norms = sorted(n for n, m in ann.items() if n in files and m["class"] == "Normal")
-    rng.shuffle(norms)
-    norms = norms[:a.normals]
-    # Interleave so the base rate of events stays realistic and normals are spread out.
-    order = []
-    ni = 0
-    for i, n in enumerate(anoms):
-        order.append(n)
-        if norms and (i + 1) % max(1, len(anoms) // max(1, len(norms))) == 0 and ni < len(norms):
-            order.append(norms[ni]); ni += 1
-    order += norms[ni:]
-    items = [{"name": n, "path": files[n], "class": ann[n]["class"],
-              "anomaly_frames": ann[n]["anomaly_frames"]} for n in order]
-    os.makedirs(E1_DIR, exist_ok=True)
-    path = os.path.join(E1_DIR, "playlist.json")
-    with open(path, "w") as f:
-        json.dump({"fps": 30.0, "items": items}, f, indent=1)
-    import cv2
-    tot = 0
-    for it in items:
-        c = cv2.VideoCapture(it["path"]); n = int(c.get(cv2.CAP_PROP_FRAME_COUNT)); c.release()
-        it["frames"] = n; tot += n
-        print(f"  {it['class']:<14}{it['name']:<32}{n:>7} frames  anomaly {it['anomaly_frames']}")
-    print(f"playlist: {len(items)} videos, {tot} frames, {tot / 30 / 60:.1f} min  -> {path}")
-    return path
-
-
 AVENUE = os.path.join(ROOT, "data", "avenue", "avenue")
 
 
-def build_avenue(a) -> str:
+def build(a) -> str:
     """CUHK Avenue: one fixed camera. Stream = 16 normal training clips then the 21 test
     clips, whose frame-level labels come from avenue.mat (1-indexed [start; end] columns)."""
     import scipy.io as sio
@@ -105,7 +55,7 @@ def build_avenue(a) -> str:
         items.append({"name": f"test{os.path.basename(d)}", "frames_dir": d, "class": "Avenue",
                       "anomaly_frames": [[int(iv[0, k]) - 1, int(iv[1, k]) - 1] for k in range(iv.shape[1])]})
     os.makedirs(E1_DIR, exist_ok=True)
-    path = os.path.join(E1_DIR, "playlist_avenue.json")
+    path = os.path.join(E1_DIR, "playlist.json")
     with open(path, "w") as f:
         json.dump({"fps": 25.0, "items": items}, f, indent=1)
     tot = sum(len(glob.glob(os.path.join(it["frames_dir"], "*.jpg"))) for it in items)
@@ -219,9 +169,8 @@ def plot(live: dict, frozen: dict, sl: dict, sf: dict, out: str, tag: str = "") 
     ax0.plot(frozen["t"] / 60.0, smooth(frozen["z"]), color=FROZ, lw=1.2, label="frozen control")
     ax0.plot(tm, smooth(live["z"]), color=LIVE, lw=1.4, label="live (learning while serving)")
     ax0.set_ylabel("surprise (z-scored, 0.5 s smoothing)", color=INK)
-    ax0.set_xlabel("stream time (min)   |   shaded = labelled event   |   vertical = camera cut", color=MUTED)
-    src = "CUHK Avenue, one fixed camera" if tag == "avenue" else "UCF-Crime surveillance cameras"
-    ax0.set_title(f"E1  Janus on real video ({src})   "
+    ax0.set_xlabel("stream time (min)   |   shaded = labelled event   |   vertical = clip cut", color=MUTED)
+    ax0.set_title(f"E1  Janus on real video (CUHK Avenue, one fixed camera)   "
                   f"novelty AUC (per-video mean) live {sl['novelty_auc_macro_raw']:.3f} vs frozen {sf['novelty_auc_macro_raw']:.3f}   "
                   f"skill vs copy live {sl['skill']:+.3f} vs frozen {sf['skill']:+.3f}", color=INK, fontsize=11)
     ax0.legend(loc="upper right", frameon=False)
@@ -275,9 +224,7 @@ def analyze(live_dir: str, frozen_dir: str, tag: str = "") -> None:
 def main() -> None:
     p = argparse.ArgumentParser()
     sub = p.add_subparsers(dest="cmd", required=True)
-    b = sub.add_parser("build"); b.add_argument("--classes", default="Arson,Arrest,Assault,Abuse")
-    b.add_argument("--normals", type=int, default=8); b.add_argument("--seed", type=int, default=0)
-    sub.add_parser("build-avenue")
+    sub.add_parser("build")
     r = sub.add_parser("run"); r.add_argument("--playlist", default=os.path.join(E1_DIR, "playlist.json"))
     r.add_argument("--tag", default="", help="suffix for run tags, e.g. 'avenue' -> live-avenue")
     r.add_argument("--duration", type=float, default=None)
@@ -285,8 +232,6 @@ def main() -> None:
     a = p.parse_args()
     if a.cmd == "build":
         build(a)
-    elif a.cmd == "build-avenue":
-        build_avenue(a)
     elif a.cmd == "run":
         extra = ["--duration", str(a.duration)] if a.duration else []
         sfx = f"-{a.tag}" if a.tag else ""
